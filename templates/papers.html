@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='easyui/themes/default/easyui.css')}}">
+    <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='easyui/themes/icon.css')}}">
+    <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='easyui/demo/demo.css')}}">
+    <script type="text/javascript" src="{{ url_for('static', filename='easyui/jquery.min.js')}}"></script>
+    <script type="text/javascript" src="{{ url_for('static', filename='easyui/jquery.easyui.min.js')}}"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/vis/4.16.1/vis.css" type="text/css" />
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/vis/4.16.1/vis-network.min.js"> </script>
+    <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='site.css')}}" />
+    <title>{{pname}}</title>
+</head>
+
+<body>
+    <script type="text/javascript">
+        var selectedNode=undefined;
+        var selectedRow=undefined;
+        var network;
+        var container;
+        var options, data;
+        //var nodes = new vis.DataSet({{nodes|tojson}});
+        //var edges = new vis.DataSet({{edges|tojson}});
+        var edges = new vis.DataSet();
+        var nodes = new vis.DataSet();
+        var paperinfo = {};
+
+        function updateSelection(paperId) {
+            console.log("Update selection " + paperId)
+            if(paperinfo[paperId] == undefined) {
+                console.error("No info for " + paperId)
+            } else {
+                var pi = document.getElementById('paperinfo');
+                pi.innerHTML = paperinfo[paperId];
+            }
+        }
+
+
+        function updateColor(new_nodes) {
+            n = new_nodes.length;
+            for (let i = 0; i < n; i++) {
+                new_node = new_nodes[i];
+                nodes.update(new_node['node_data']);
+            }
+            var n_rows = $('#papertable').datagrid('getRows').length;
+            for (let i=0; i<n_rows; i++) {
+                $('#papertable').datagrid('refreshRow',i);
+            }
+            $('#papertable').datagrid('reload');
+        }
+
+        $(function() {
+            $('#papertable').datagrid({
+                rowStyler:function(index,row){
+                    console.log(row)
+                    if(row == undefined) {
+                        return 'background-color:white';
+                    }
+                    console.log(row.nodeId);
+                    if(row.nodeId == undefined) {
+                        return 'background-color:white';
+                    }
+
+                    rowNodeId = row.nodeId;
+                    if(rowNodeId==selectedNode) {
+                        return 'background-color:white';
+                    }
+                    console.log("Set row color for " + rowNodeId);
+                    gNodes = nodes.get({'id': rowNodeId})
+                    for(let i=0; i<gNodes.length; i++) {
+                        gNode = gNodes[i];
+                        if(gNode['id'] == rowNodeId) {
+                            console.log(gNode)
+                            new_color = gNode['color'];
+                            console.log("Set row color for " + rowNodeId + " -> " + new_color);
+                            return 'background-color:' + new_color;
+                        }
+                    }
+                    return 'background-color:white';
+                }
+            });
+        });
+
+        function updateGraph(new_nodes, new_edges, new_paperinfo) {
+            n = new_nodes.length;
+            for (let i = 0; i < n; i++) {
+                new_node = new_nodes[i];
+                console.log("Add node " + new_node['node_data']['id']);
+                nodes.update(new_node['node_data']);
+                var new_row = {
+                    year:new_node['year'],
+                    nc:new_node['ncit'],
+                    author:new_node['author'],
+                    title:new_node['title']
+                };
+                console.log("Add row " + new_row['title'] + ", " + new_row['year'] + ", " + new_row['ncit'] + ", " + new_row['author']);
+                $('#papertable').datagrid('appendRow',{
+                    year:new_node['year'],
+                    nc:new_node['ncit'],
+                    author:new_node['author'],
+                    title:new_node['title'],
+                    nodeId:new_node['node_data']['id']
+                });
+                $('#papertable').datagrid('reload');
+                last_row = $('#papertable').datagrid('getRows').length-1;
+                new_row = $('#papertable').datagrid('getRows')[last_row];
+                new_row.id = "row_" + new_node['node_data']['id'];
+                $('#papertable').datagrid('reload');
+            }
+            n = new_edges.length;
+            for (let i = 0; i < n; i++) {
+                new_edge = new_edges[i];
+                console.log("Add edge " + new_edge);
+                edges.update(new_edge);
+            }
+            n = new_paperinfo.length;
+            for (let i = 0; i < n; i++) {
+                new_pi = new_paperinfo[i];
+                console.log("Add pi " + new_pi);
+                paperinfo[new_pi['id']] = new_pi['html'];
+            }
+        }
+        function drawGraph() {
+            console.log("drawGrap");
+            var container = document.getElementById('citgraph');
+
+            data = {
+                nodes: nodes,
+                edges: edges
+            };
+            var options = {
+                "configure": {
+                    "enabled": false
+                },
+                "edges": {
+                    "color": {
+                        "inherit": false
+                    },
+                    "smooth": {
+                        "enabled": false,
+                        "type": "continuous"
+                    },
+                        "arrows": {
+                        "to": {
+                            "enabled": true,
+                            "scaleFactor": 0.8,
+                        },
+                    },
+                },
+                "interaction": {
+                    "dragNodes": true,
+                    "hideEdgesOnDrag": false,
+                    "hideNodesOnDrag": false
+                },
+                "physics": {
+                    "enabled": true,
+                    "repulsion": {
+                        "centralGravity": 0.002,
+                        "damping": 0.1,
+                        "nodeDistance": 100,
+                        "springConstant": 0.00005,
+                        "springLength": 300
+                    },
+                    "solver": "repulsion",
+                    "stabilization": {
+                        "enabled": true,
+                        "fit": true,
+                        "iterations": 1000,
+                        "onlyDynamicEdges": false,
+                        "updateInterval": 50
+                    }
+                }
+            };
+
+            network = new vis.Network(container, data, options);
+            updateGraph({{nodes|tojson}}, {{edges|tojson}}, {{paperinfo|tojson}});
+
+            network.on("click", function(params) {
+                var nodeId = params.nodes.toString();
+                selectedNode = nodeId;
+                var row_id = "row_" + selectedNode;
+                console.log("Seaching for " + row_id);
+                var n_rows = $('#papertable').datagrid('getRows').length;
+                var rows = $('#papertable').datagrid('getRows');
+                var row_index=undefined;
+                for (let i=0; i<n_rows; i++) {
+                    console.log(i);
+                    console.log(rows[i]);
+                    if(rows[i].id==row_id) {
+                        row_index = i;
+                        break; 
+                    }
+                }
+                if(row_index==undefined) {
+                    console.log("Could not find row");
+                    return;
+                }
+                $('#papertable').datagrid('selectRow', row_index);
+                selectedRow = row_index;
+                console.log("Selected Node " + selectedNode);
+                console.log("Selected row " + selectedRow);
+                for (let i=0; i<n_rows; i++) {
+                    $('#papertable').datagrid('refreshRow',i);
+                }
+
+                updateSelection(selectedNode);
+            });
+            return network;
+        }
+    </script>
+
+    <div class="easyui-layout" fit="true">
+        <div data-options=" region:'west',split:true" title="Paper List" style="width:300px;">
+            <div style="padding:5px;background:#fafafa;width:500px;border:1px solid #ccc">
+                <a id="getcits" href="#" class="easyui-linkbutton" plain="true">Citations</a>
+                <a id="getrefs" href="#" class="easyui-linkbutton" plain="true">References</a>
+                <a id="filter" href="#" class="easyui-linkbutton" plain="true">Filter</a>
+            </div>
+            <table class="easyui-datagrid" id="papertable" data-options="method:'get',nowrap:false,border:false,singleSelect:true,fit:true,fitColumns:true,remoteSort:false,multiSort:true,onClickCell:onClickCell">
+                <thead>
+                    <tr>
+                        <th data-options="field:'year',sortable:true" width="10">Year</th>
+                        <th data-options="field:'nc',sortable:true" width="10">#Cit</th>
+                        <th data-options="field:'author',align:'right',sortable:true" width="20">Author</th>
+                        <th data-options="field:'title',align:'right',sortable:true" width="30">Title</th>
+                        <th data-options="field:'nodeId',hidden:true" width="0"></th>
+                    </tr>
+                </thead>
+            </table>
+            <script type="text/javascript">
+
+                function changeColoring(newValue,oldValue){
+                    if(oldValue!=newValue) {
+                        $.getJSON("{{url_for('setcolor')}}", {
+                            'pname': "{{pname}}",
+                            'color': newValue,
+                        }).done(function(data) {
+                            console.log(data);
+                            updateColor(data['new_nodes']);
+                        });
+                    }
+                }
+
+                function onClickCell(index, field){
+                    console.log("clicked " + index);
+                    row = $('#papertable').datagrid('getRows')[index];
+                    selectedNode = row.id.split("_")[1];
+                    selectedRow = index;
+                    network.selectNodes([selectedNode]);
+                    console.log("Selected Node " + selectedNode);
+                    console.log("Selected row " + selectedRow);
+                    
+                    var n_rows = $('#papertable').datagrid('getRows').length;
+                    for (let i=0; i<n_rows; i++) {
+                        $('#papertable').datagrid('refreshRow',i);
+                    }
+                    updateSelection(selectedNode);
+                }
+                $(function() {
+                    $('#getcits').bind('click', function(e) {
+                        if(selectedNode==undefined || selectedRow==undefined) {
+                            return;
+                        }
+                        $.getJSON("{{url_for('getcits')}}", {
+                            'pname': "{{pname}}",
+                            'paperid': selectedNode,
+                        }).done(function(data) {
+                            console.log(data);
+                            updateGraph(data['new_nodes'], data['new_edges'], data['new_paperinfo']);
+                        });
+                    });
+                });
+
+                $(function() {
+                    $('#getrefs').bind('click', function(e) {
+                        if(selectedNode==undefined || selectedRow==undefined) {
+                            return;
+                        }
+                        $.getJSON("{{url_for('getrefs')}}", {
+                            'pname': "{{pname}}",
+                            'paperid': selectedNode,
+                        }).done(function(data) {
+                            console.log(data);
+                            updateGraph(data['new_nodes'], data['new_edges'], data['new_paperinfo']);
+                        });
+                    });
+                });
+
+                $(function() {
+                    $('#filter').bind('click', function(e) {
+                        if(selectedNode==undefined || selectedRow==undefined) {
+                            return;
+                        }
+                        $.getJSON("{{url_for('filter')}}", {
+                            'pname': "{{pname}}",
+                            'paperid': selectedNode,
+                        }).done(function(data) {
+                            console.log(data);
+                            nodes.remove({
+                                "id": selectedNode
+                            });
+
+                            console.log("Selected Node " + selectedNode);
+                            console.log("Selected row " + selectedRow);
+                            $('#papertable').datagrid('deleteRow', selectedRow);
+                            $('#papertable').datagrid('reload');
+                            selectedRow = undefined;
+                            selectedNode = undefined;
+                        });
+                    });
+                });
+            </script>
+        </div>
+
+        <div data-options="region:'center',title:'Citation Graph'">
+            <form id="addpaper" method="get">
+                <div>
+                    <input type="hidden" name="pname" value={{pname}}>
+                    <label for="paperid">Add PaperId:</label>
+                    <input class="easyui-validatebox" type="text" name="paperid" />
+                </div>
+            </form>
+            <select id="color" class="easyui-combobox" name="dept" style="width:200px;" data-options="onChange:changeColoring">
+                <option value="COLLECTION">Collection</option>
+                <option value="AUTHOR">Author</option>
+                <option value="YEAR">Year</option>
+                <option value="NCIT">Citations</option>
+            </select>
+            <script type="text/javascript">
+                var url = "{{ url_for('addpaper') }}";
+                $('#addpaper').form({
+                    url: url,
+                    datatype: "json",
+                    success: function(res) {
+                        data = JSON.parse(res);
+                        console.log(data);
+                        updateGraph(data['new_nodes'], data['new_edges'], data['new_paperinfo']);
+                    }
+                });
+            </script>
+            <div id="citgraph" style="height:100%;">
+                <script type="text/javascript">
+                    $(document).ready(function(){
+                        drawGraph(); 
+                    });
+                </script>
+            </div>
+        </div>
+
+        <div id="paperinfo" data-options="region:'east',title:'Paper Info',split:true" style="width:80px;">
+            INFO
+        </div>"
+</body>
+
+</html>

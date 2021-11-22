@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='site.css')}}" />
+    <script src="https://www.kryogenix.org/code/browser/sorttable/sorttable.js"></script>
+    <meta charset="utf-8" />
+    <title>Hello!</title>
+</head>
+
+<body>
+    <div>
+        <h2>Select Existing Project</h2>
+        <form method="GET" action="{{url_for('load_project')}}">
+            <select name="pname" id="projects">
+                {% for project in projectlist %}
+                <option value="{{project}}">{{project}}</option>
+                {% endfor %}
+            </select>
+            <input type="submit" value="Load">
+        </form>
+    </div>
+
+    <div>
+        <h2>Create New Project</h2>
+        <form method="GET" action="{{url_for('create_project')}}">
+            <table>
+                <tr>
+                    <td>Project Name</td>
+                    <td><input name="pname" type="text"></td>
+                </tr>
+                <tr>
+                    <td>Min. Year Published</td>
+                    <td><input name="year" type="text" value="2000"></td>
+                </tr>
+                <tr>
+                    <td>Max. Citation Count</td>
+                    <td><input name="ncit" type="text" value="256"></td>
+                </tr>
+            </table>
+            <input type="submit" value="Create">
+        </form>
+
+
+    </div>
+</body>
+
+</html>
