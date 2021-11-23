@@ -7,11 +7,14 @@ logging.basicConfig(format=FORMAT, level=logging.INFO)
 import itertools
 import networkx as nx
 import os
+import re
 import json
 import pickle
 import matplotlib.pyplot as plt
 import matplotlib
 import numpy as np
+from fuzzywuzzy import fuzz
+from fuzzywuzzy import process
 from semanticscholar import SemanticScholar
 from zotapi import ZotApi
 
@@ -149,36 +152,44 @@ class ZotGraph:
     def getPaperInfo(self):
         paperInfo = []
         for node in self.g.nodes:
-            try:
-                with open(os.path.join(self.htmldir, "%s.html" % node), "r") as fd:
-                    paperInfo.append({
-                        'id': node,
-                        'html': fd.read(),
-                    })
-            except Exception as e:
-                logging.warn("Could not get info for '%s': %s" % (node, e))
+            paperInfo.append({
+                'id': node,
+                'html': self.__getPaperInfo(node),
+            })
         return paperInfo
 
+    def __clearCacheNode(self, paperId):
+        if paperId == "":
+            logging.error("Empty PaperId")
+            return
+        ncache_path = os.path.join(self.ncachefn, paperId)
+        if os.path.exists(ncache_path):
+            os.remove(ncache_path)
+
     def __storeCacheNode(self, paperId, node, force=False):
+        if paperId == "":
+            logging.error("Empty PaperId")
+            return
         if force or not os.path.exists(os.path.join(self.ncachefn, paperId)):
             with open(os.path.join(self.ncachefn, paperId), "w") as fd:
                 fd.write(json.dumps(node, sort_keys=True, indent=2))
 
     def __loadCacheNode(self, paperId):
+        if paperId == "":
+            logging.error("Empty PaperId")
+            return
         if not os.path.exists(os.path.join(self.ncachefn, paperId)):
             return None
         with open(os.path.join(self.ncachefn, paperId), "r") as fd:
             logging.info("Loading Cached Node %s" % paperId)
-            try:
-                node = json.loads(fd.read())
-                node['r_processed'] = False
-                node['c_processed'] = False
-                return node
-            except:
-                return None
-    
+            node = json.loads(fd.read())
+            node['r_processed'] = False
+            node['c_processed'] = False
+            return node
+
     def __makeNewNode(self, paperId):
         try:
+            logging.info("Searching Semantic Scholar for '%s'" % (paperId))
             smitem = self.sm.paper(paperId)
         except Exception as e:
             logging.error("Failed to get paper '%s' from semanticscholar: %s" % (paperId, e))
@@ -188,7 +199,15 @@ class ZotGraph:
         doi = smitem['doi']
         paperId = smitem['paperId']
         logging.info("Searching Zotero for '%s' / '%s'" % (doi, title))
-        zaitem = self.za.findItem(key=None, doi=doi, title=title)
+        zaitem = []
+        try:
+            zaitem = self.za.findItem(key=None, doi=doi, title=title)
+        except Exception as e:
+            logging.error("Error getting ZaItem for paperId %s: %s" % (paperId, e))
+
+        if zaitem and len(zaitem) > 0:
+            zaitem[0]['extref'], zaitem[0]['refinfo'] = self.za.extractRefs(zaitem[0]['data']['key'])
+
         node = {
             'doi': doi,
             'r_processed': False,
@@ -197,10 +216,92 @@ class ZotGraph:
             'zaitem': zaitem,
             'title': title,
         }
-
         self.__storeCacheNode(paperId, node)
 
         return node
+    
+    def __getPaperIdByTitle(self, title):
+        if title is None:
+            return None
+        for paperId, node in self.nodes.items():
+            if fuzz.partial_ratio(node['title'].lower(), title.lower()) > 70:
+                return paperId
+        return None
+
+    def __getAnnotRefs(self, paperId):
+        refs_replace = {}
+        logging.info("Ref paper %s" % paperId)
+        annots = self.za.getAnnotations(self.nodes[paperId]['zaitem'][0]['key'])[0]
+        prefs = None
+        plinks = None
+        try:
+            prefs = self.nodes[paperId]['zaitem'][0]['extref']["titles"]
+            plinks = self.nodes[paperId]['zaitem'][0]['extref']["links"]
+        except Exception as e:
+            logging.info("No extracted annotations for %s: %s" % (paperId, e))
+            logging.info(json.dumps(self.nodes[paperId]['zaitem'][0]))
+            return {}
+        p = re.compile("\[(?:\d+,*\s*)+\d+\]")
+        refs = p.findall(annots)
+        for ref in refs:
+            replacements = []
+            #logging.info("Ref: %s" % ref)
+            refstr = ref[1:-1]
+            for refp in refstr.split(", "):
+                new_ref = refp
+                #l_scholar = "%ss" % refp
+                #l_graph = "%sg" % refp
+                #l_ref = "%su" % refp
+                ref_idx = int(refp) - 1
+                if plinks is not None and len(plinks) > int(ref_idx):
+                    ref_url = plinks[ref_idx]
+                    if ref_url is not None:
+                        l_ref = "<a href=\"%s\" id=\"paperref\">u</a>" % (ref_url)
+                        new_ref += l_ref
+                if prefs is not None and len(prefs) > int(ref_idx):
+                    ref_title = prefs[ref_idx]
+                    logging.info(ref_title)
+                    ref_paperId = self.__getPaperIdByTitle(ref_title)
+                    if ref_paperId is not None:
+                        ref_linkurl = "https://www.semanticscholar.org/paper/%s" % ref_paperId
+                        l_scholar = "<a href=\"%s\" id=\"paperref\">s</a>" % (ref_linkurl)
+                        new_ref += l_scholar
+                        l_graph = "<a href=\"javascript:highlight_edge(\'%s\', \'%s\');\" id=\"paperref\">g</a>" % (paperId, ref_paperId)
+                        new_ref += l_graph
+                replacements.append(new_ref)
+
+            refs_replace[ref] = "[%s]" % ", ".join(replacements)
+        return refs_replace
+
+    def __getPaperInfo(self, paperId):
+        try:
+            abstract = self.nodes[paperId]['smitem']["abstract"] + '\n'
+            #logging.info("Got abstarct for %s: %s" % (paperId, abstract))
+        except Exception as e:
+            logging.info("No abstarct for %s: %s" % (paperId, e))
+            abstract = "NO ABSTRACT\n"
+        try:
+            annots = self.za.getAnnotations(self.nodes[paperId]['zaitem'][0]['key'])[0] + '\n'
+            #logging.info("Got annots for %s: %s" % (paperId, annots))
+            ref_replace = self.__getAnnotRefs(paperId)
+            for key, replacement in ref_replace.items():
+                logging.info("Replace %s ref %s -> %s" % (paperId, key, replacement))
+                annots = annots.replace(key, replacement)
+        except Exception as e:
+            logging.info("No annots for %s: %s" % (paperId, e))
+            annots = "NO ANNOTS\n"
+        linkurl = "https://www.semanticscholar.org/paper/%s" % paperId
+        ret = '<p>\n'
+        ret += '<a href="%s">%s</a>\n' % (linkurl, linkurl)
+        ret += '</p>\n'
+        ret += '<p>\n'
+        ret += abstract
+        ret += '</p>\n'
+        ret += '<p>\n'
+        ret += annots
+        ret += '</p>\n'
+
+        return ret
 
     def __getNode(self, paperId):
         node = self.__loadCacheNode(paperId)
@@ -223,7 +324,7 @@ class ZotGraph:
             logging.err("Invalid coloring")
             return False
         self.coloring = coloring
-        logging.info("Coloring: %s" % self.coloring)
+        #logging.info("Coloring: %s" % self.coloring)
         self.colcolors = {}
         return True
 
@@ -267,7 +368,8 @@ class ZotGraph:
             nextcolor = matplotlib.colors.rgb2hex(self.color[self.coloring].to_rgba(int(year),alpha=lightness))
         except Exception as e:
             logging.error("Error %s" % e)
-        logging.info("Color %s" % nextcolor)
+            nextcolor = "#ffffff"
+        #logging.info("Color %s" % nextcolor)
         return nextcolor
 
     def __getColorNcit(self, paperId, lightness=0.4):
@@ -276,14 +378,15 @@ class ZotGraph:
             nextcolor = matplotlib.colors.rgb2hex(self.color[self.coloring].to_rgba(int(ncit),alpha=lightness))
         except Exception as e:
             logging.error("Error %s" % e)
-        logging.info("Color %s" % nextcolor)
+            nextcolor = "#ffffff"
+        #logging.info("Color %s" % nextcolor)
         return nextcolor
 
     def getNodeColor(self, paperId):
         if paperId not in self.nodes.keys():
             logging.error("Error no node for PaperId '%s'" % paperId)
             return
-        logging.info(self.coloring)
+        #logging.info(self.coloring)
         if self.coloring == "COLLECTION":
             return self.__getColorCollection(paperId)
         if self.coloring == "AUTHOR":
@@ -363,42 +466,22 @@ class ZotGraph:
 
     def addPaperId(self, paperId):
         logging.info("Add paperId '%s'" % (paperId))
-        #if paperId in self.nodes.keys():
-        #    logging.info("PaperId %s already present" % paperId)
-        #    return [], []
-        #if paperId in self.filterIds:
-        #    logging.info("PaperId '%s' is filtered" % paperId)
-        #    return [], []
         return self.__addNode('', '', paperId)
 
-    def rescanZotero(self, paperId):
-        if paperId not in self.nodes.keys():
-            logging.error("Error no node for PaperId '%s'" % paperId)
-            return
+    def rescan(self, paperId):
+        logging.info("Rescan PaperId %s" % paperId)
         self.za.reloadCsv()
-        node = self.nodes[paperId]
-        new_zaitem = None
-        try:
-            zaitem = node['zaitem']
-            logging.info("Found existing zaitem")
-            zakey = zaitem[0]['data']['key']
-            new_zaitem = self.za.getItemByKey(zakey)
-        except:
-            pass
-        if new_zaitem is None:
-            try:
-                doi = node['doi']
-                title = node['title']
-                new_zaitem = self.za.findItem(key=None, doi=doi, title=title)
-            except:
-                pass
-
-        if new_zaitem is None:
-            logging.info("No Zotero Entry for PaperId '%s'" % paperId)
-            return
-
-        self.nodes[paperId]['zaitem'] = new_zaitem
-        self.__storeCacheNode(paperId, self.nodes[paperId], force=True)
+        self.__clearCacheNode(paperId)
+        new_nodes = []
+        new_edges = []
+        new_paperinfo = []
+        node = self.__getNode(paperId)
+        new_nodes.append(self.getJsNode(paperId))
+        new_paperinfo.append({
+            'id': paperId,
+            'html': self.__getPaperInfo(paperId),
+        })
+        return new_nodes, new_edges, new_paperinfo
 
     def removePaperId(self, paperId):
         logging.info("Remove PaperId '%s'" % (paperId))
@@ -455,47 +538,14 @@ class ZotGraph:
         logging.info("Add node '%s' / '%s'" % (paperId, label))
         self.g.add_node(paperId, label=label, shape='box', color=color)
         new_nodes.append(self.getJsNode(paperId))
+        new_paperinfo.append({
+            'id': paperId,
+            'html': self.__getPaperInfo(paperId),
+        })
         if pnode:
             if isRef:
                 new_edges.append(self.__addEdge(pnode, paperId, isInfluential, edgeColor))
             else:
                 new_edges.append(self.__addEdge(paperId, pnode, isInfluential, edgeColor))
-        
-        paperinfo_path = os.path.join(self.htmldir, paperId + ".html")
-
-        if not os.path.exists(paperinfo_path):
-            try:
-                annots = self.za.getAnnotations(self.nodes[paperId]['zaitem'][0]['key'])[0] + '\n'
-                logging.info("Got annots for %s: %s" % (paperId, annots))
-            except Exception as e:
-                logging.info("No annots for %s: %s" % (paperId, e))
-                annots = "NO ANNOTS\n"
-            with open(paperinfo_path, "w") as fd:
-                linkurl = "https://www.semanticscholar.org/paper/%s" % paperId
-                fd.write('<p>\n')
-                fd.write('<a href="%s">%s</a>\n' % (linkurl, linkurl))
-                fd.write('</p>\n')
-                fd.write('<p>\n')
-                try:
-                    abstract = self.nodes[paperId]['smitem']["abstract"] + '\n'
-                    logging.info("Got abstarct for %s: %s" % (paperId, abstract))
-                except Exception as e:
-                    logging.info("No abstarct for %s: %s" % (paperId, e))
-                    abstract = "NO ABSTRACT\n"
-                fd.write(abstract)
-                fd.write('</p>\n')
-                fd.write('<p>\n')
-                fd.write(annots)
-                
-                fd.write('</p>\n')
-
-        try:
-            with open(paperinfo_path, "r") as fd:
-                new_paperinfo.append({
-                    'id': paperId,
-                    'html': fd.read(),
-                })
-        except Exception as e:
-            logging.warn("could not read paper info %s" % paperinfo_path)
 
         return new_nodes, new_edges, new_paperinfo

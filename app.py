@@ -1,6 +1,6 @@
 from flask import Flask, render_template, request, redirect, url_for
 app = Flask(__name__)
-app.config.from_pyfile('config.py')
+app.config.from_pyfile('my_zotconfig.py')
 import logging
 FORMAT = "[%(filename)s:%(lineno)s - %(funcName)20s() ] %(message)s"
 logging.basicConfig(format=FORMAT, level=logging.INFO)
@@ -120,7 +120,7 @@ def addpaper():
     logging.info("Add PaperId %s" % paperId)
     new_edges = []
     new_nodes = []
-    if paperId is not None:
+    if paperId is not None and paperId != "":
         new_nodes, new_edges, new_paperinfo = projects[pname].addPaperId(paperId)
         projects[pname].saveGraph()
     res = {
@@ -138,7 +138,7 @@ def getcits():
     res = {}
     new_edges = []
     new_nodes = []
-    if paperId is not None:
+    if paperId is not None and paperId != "":
         new_nodes, new_edges, new_paperinfo = projects[pname].addLinks(paperId, onlyCit=True)
         projects[pname].saveGraph()
     res = {
@@ -156,9 +156,27 @@ def getrefs():
     res = {}
     new_edges = []
     new_nodes = []
-    if paperId is not None:
+    new_paperinfo = []
+    if paperId is not None and paperId != "":
         new_nodes, new_edges, new_paperinfo = projects[pname].addLinks(paperId, onlyRef=True)
         projects[pname].saveGraph()
+    res = {
+        'new_nodes': new_nodes,
+        'new_edges': new_edges,
+        'new_paperinfo': new_paperinfo,
+    }
+    return res
+
+@app.route('/rescan')
+def rescan():
+    pname = request.args.get("pname")
+    paperId = request.args.get("paperid")
+    logging.info("Rescan PaperId %s" % paperId)
+    res = {}
+    new_edges = []
+    new_nodes = []
+    if paperId is not None and paperId != "":
+        new_nodes, new_edges, new_paperinfo = projects[pname].rescan(paperId)
     res = {
         'new_nodes': new_nodes,
         'new_edges': new_edges,

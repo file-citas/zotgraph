@@ -21,12 +21,20 @@
         var network;
         var container;
         var options, data;
-        //var nodes = new vis.DataSet({{nodes|tojson}});
-        //var edges = new vis.DataSet({{edges|tojson}});
         var edges = new vis.DataSet();
         var nodes = new vis.DataSet();
         var paperinfo = {};
 
+        function highlight_edge(p0, p1) {
+            //alert(p0 + "-" + p1);
+            //es = edges.get({'from': p0, 'to': p1});
+            es = edges.get().filter(function (edge) {
+                return edge.from === p0 && edge.to === p1;
+            });
+            if(es.length>0) {
+                network.selectEdges([es[0]['id']]);
+            }
+        }
         function updateSelection(paperId) {
             console.log("Update selection " + paperId)
             if(paperinfo[paperId] == undefined) {
@@ -54,11 +62,11 @@
         $(function() {
             $('#papertable').datagrid({
                 rowStyler:function(index,row){
-                    console.log(row)
+                    //console.log(row)
                     if(row == undefined) {
                         return 'background-color:white';
                     }
-                    console.log(row.nodeId);
+                    //console.log(row.nodeId);
                     if(row.nodeId == undefined) {
                         return 'background-color:white';
                     }
@@ -67,12 +75,14 @@
                     if(rowNodeId==selectedNode) {
                         return 'background-color:white';
                     }
-                    console.log("Set row color for " + rowNodeId);
-                    gNodes = nodes.get({'id': rowNodeId})
+                    //console.log("Set row color for " + rowNodeId);
+                    //gNodes = nodes.get({'id': rowNodeId})
+                    gNodes = [network.body.data.nodes._data[rowNodeId]];
+                    //console.log(gNodes.length)
                     for(let i=0; i<gNodes.length; i++) {
                         gNode = gNodes[i];
                         if(gNode['id'] == rowNodeId) {
-                            console.log(gNode)
+                            //console.log(gNode)
                             new_color = gNode['color'];
                             console.log("Set row color for " + rowNodeId + " -> " + new_color);
                             return 'background-color:' + new_color;
@@ -95,19 +105,31 @@
                     author:new_node['author'],
                     title:new_node['title']
                 };
-                console.log("Add row " + new_row['title'] + ", " + new_row['year'] + ", " + new_row['ncit'] + ", " + new_row['author']);
-                $('#papertable').datagrid('appendRow',{
-                    year:new_node['year'],
-                    nc:new_node['ncit'],
-                    author:new_node['author'],
-                    title:new_node['title'],
-                    nodeId:new_node['node_data']['id']
-                });
-                $('#papertable').datagrid('reload');
-                last_row = $('#papertable').datagrid('getRows').length-1;
-                new_row = $('#papertable').datagrid('getRows')[last_row];
-                new_row.id = "row_" + new_node['node_data']['id'];
-                $('#papertable').datagrid('reload');
+                needs_row = true;
+                rows = last_row = $('#papertable').datagrid('getRows')
+                n_rows = rows.length;
+                for(let i=0; i<n_rows; i++) {
+                    //$('#papertable').datagrid('refreshRow',i);
+                    if(rows[i]['nodeId'] == new_node['node_data']['id']) {
+                        needs_row = false;
+                        //break;
+                    }
+                }
+                if(needs_row) {
+                    console.log("Add row " + new_row['title'] + ", " + new_row['year'] + ", " + new_row['ncit'] + ", " + new_row['author']);
+                    $('#papertable').datagrid('appendRow',{
+                        year:new_node['year'],
+                        nc:new_node['ncit'],
+                        author:new_node['author'],
+                        title:new_node['title'],
+                        nodeId:new_node['node_data']['id']
+                    });
+                    $('#papertable').datagrid('reload');
+                    last_row = $('#papertable').datagrid('getRows').length-1;
+                    new_row = $('#papertable').datagrid('getRows')[last_row];
+                    new_row.id = "row_" + new_node['node_data']['id'];
+                    $('#papertable').datagrid('reload');
+                }
             }
             n = new_edges.length;
             for (let i = 0; i < n; i++) {
@@ -148,6 +170,11 @@
                             "scaleFactor": 0.8,
                         },
                     },
+                    "color": {
+                        "highlight": "#ff0000",
+                    },
+                    "selectionWidth": function (width) {return width*3;},
+                    
                 },
                 "interaction": {
                     "dragNodes": true,
@@ -186,8 +213,8 @@
                 var rows = $('#papertable').datagrid('getRows');
                 var row_index=undefined;
                 for (let i=0; i<n_rows; i++) {
-                    console.log(i);
-                    console.log(rows[i]);
+                    //console.log(i);
+                    //console.log(rows[i]);
                     if(rows[i].id==row_id) {
                         row_index = i;
                         break; 
@@ -198,12 +225,15 @@
                     return;
                 }
                 $('#papertable').datagrid('selectRow', row_index);
+                var lastSelectedRow = selectedRow;
                 selectedRow = row_index;
+                $('#papertable').datagrid('refreshRow',lastSelectedRow);
+                $('#papertable').datagrid('refreshRow',selectedRow);
                 console.log("Selected Node " + selectedNode);
                 console.log("Selected row " + selectedRow);
-                for (let i=0; i<n_rows; i++) {
-                    $('#papertable').datagrid('refreshRow',i);
-                }
+                //for (let i=0; i<n_rows; i++) {
+                //    $('#papertable').datagrid('refreshRow',i);
+                //}
 
                 updateSelection(selectedNode);
             });
@@ -214,6 +244,7 @@
     <div class="easyui-layout" fit="true">
         <div data-options=" region:'west',split:true" title="Paper List" style="width:300px;">
             <div style="padding:5px;background:#fafafa;width:500px;border:1px solid #ccc">
+                <a id="rescan" href="#" class="easyui-linkbutton" plain="true">Rescan</a>
                 <a id="getcits" href="#" class="easyui-linkbutton" plain="true">Citations</a>
                 <a id="getrefs" href="#" class="easyui-linkbutton" plain="true">References</a>
                 <a id="filter" href="#" class="easyui-linkbutton" plain="true">Filter</a>
@@ -237,7 +268,6 @@
                             'pname': "{{pname}}",
                             'color': newValue,
                         }).done(function(data) {
-                            console.log(data);
                             updateColor(data['new_nodes']);
                         });
                     }
@@ -253,9 +283,9 @@
                     console.log("Selected row " + selectedRow);
                     
                     var n_rows = $('#papertable').datagrid('getRows').length;
-                    for (let i=0; i<n_rows; i++) {
-                        $('#papertable').datagrid('refreshRow',i);
-                    }
+                    //for (let i=0; i<n_rows; i++) {
+                    //    $('#papertable').datagrid('refreshRow',i);
+                    //}
                     updateSelection(selectedNode);
                 }
                 $(function() {
@@ -267,11 +297,25 @@
                             'pname': "{{pname}}",
                             'paperid': selectedNode,
                         }).done(function(data) {
-                            console.log(data);
                             updateGraph(data['new_nodes'], data['new_edges'], data['new_paperinfo']);
                         });
                     });
                 });
+
+                $(function() {
+                    $('#rescan').bind('click', function(e) {
+                        if(selectedNode==undefined || selectedRow==undefined) {
+                            return;
+                        }
+                        $.getJSON("{{url_for('rescan')}}", {
+                            'pname': "{{pname}}",
+                            'paperid': selectedNode,
+                        }).done(function(data) {
+                            updateGraph(data['new_nodes'], data['new_edges'], data['new_paperinfo']);
+                        });
+                    });
+                });
+
 
                 $(function() {
                     $('#getrefs').bind('click', function(e) {
@@ -282,7 +326,6 @@
                             'pname': "{{pname}}",
                             'paperid': selectedNode,
                         }).done(function(data) {
-                            console.log(data);
                             updateGraph(data['new_nodes'], data['new_edges'], data['new_paperinfo']);
                         });
                     });
@@ -297,7 +340,6 @@
                             'pname': "{{pname}}",
                             'paperid': selectedNode,
                         }).done(function(data) {
-                            console.log(data);
                             nodes.remove({
                                 "id": selectedNode
                             });
@@ -335,7 +377,6 @@
                     datatype: "json",
                     success: function(res) {
                         data = JSON.parse(res);
-                        console.log(data);
                         updateGraph(data['new_nodes'], data['new_edges'], data['new_paperinfo']);
                     }
                 });

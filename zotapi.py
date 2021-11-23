@@ -2,6 +2,8 @@ from pyzotero import zotero
 import pandas as pd
 import logging
 
+from refextract import RefExtract
+
 
 class ZotApi:
     def __init__(self, libcsv, library_id, library_type, api_key):
@@ -68,6 +70,27 @@ class ZotApi:
     def getAnnotations(self, key):
         logging.info("get annotaitons for key %s" % key)
         return self.df[self.df['Key'] == key]['Notes'].values
+
+    def extractRefs(self, key):
+        try:
+            pdfpath = self.getPdfPath(key)
+        except Exception as e:
+            logging.warn("Could not get pdf path for key '%s': %s" % (key, e))
+            return  {}, {}
+        if not pdfpath:
+            logging.warn("No pdf for %s" % key)
+            return {}, {}
+        return RefExtract.extractRefs(pdfpath)
+        
+    def getPdfPath(self, key):
+        logging.info("get pdf path for key %s" % key)
+        files = self.df[self.df['Key'] == key]['File Attachments'].values
+        if len(files) == 1:
+            for fn in files[0].split("; "):
+                if fn.endswith(".pdf"):
+                    return fn
+        return None
+
 
     def __getParentCollectionNames(self, ckey):
         col = self.zot.collection(ckey)
