@@ -175,6 +175,7 @@ def rescan():
     res = {}
     new_edges = []
     new_nodes = []
+    new_paperinfo = []
     if paperId is not None and paperId != "":
         new_nodes, new_edges, new_paperinfo = projects[pname].rescan(paperId)
     res = {
@@ -183,6 +184,23 @@ def rescan():
         'new_paperinfo': new_paperinfo,
     }
     return res
+
+@app.route('/rescan_all')
+def rescan_all():
+    pname = request.args.get("pname")
+    logging.info("Rescan all PaperIds")
+    res = {}
+    new_edges = []
+    new_nodes = []
+    new_paperinfo = []
+    new_nodes, new_edges, new_paperinfo = projects[pname].rescan_all()
+    res = {
+        'new_nodes': new_nodes,
+        'new_edges': new_edges,
+        'new_paperinfo': new_paperinfo,
+    }
+    return res
+
 
 @app.route('/filter')
 def filter():

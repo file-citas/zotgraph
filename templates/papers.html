@@ -198,7 +198,13 @@
                         "onlyDynamicEdges": false,
                         "updateInterval": 50
                     }
-                }
+                },    
+                //"layout": {
+                //    "hierarchical": {
+                //        "enabled": true,
+                //        //"direction": "directionInput",
+                //    },
+                //},
             };
 
             network = new vis.Network(container, data, options);
@@ -224,7 +230,7 @@
                     console.log("Could not find row");
                     return;
                 }
-                $('#papertable').datagrid('selectRow', row_index);
+                //$('#papertable').datagrid('selectRow', row_index);
                 var lastSelectedRow = selectedRow;
                 selectedRow = row_index;
                 $('#papertable').datagrid('refreshRow',lastSelectedRow);
@@ -277,7 +283,11 @@
                     console.log("clicked " + index);
                     row = $('#papertable').datagrid('getRows')[index];
                     selectedNode = row.id.split("_")[1];
+                    //selectedRow = index;
+                    var lastSelectedRow = selectedRow;
                     selectedRow = index;
+                    $('#papertable').datagrid('refreshRow',lastSelectedRow);
+                    $('#papertable').datagrid('refreshRow',selectedRow);
                     network.selectNodes([selectedNode]);
                     console.log("Selected Node " + selectedNode);
                     console.log("Selected row " + selectedRow);
@@ -315,6 +325,17 @@
                         });
                     });
                 });
+
+                $(function() {
+                    $('#rescan_all').bind('click', function(e) {
+                        $.getJSON("{{url_for('rescan_all')}}", {
+                            'pname': "{{pname}}",
+                        }).done(function(data) {
+                            updateGraph(data['new_nodes'], data['new_edges'], data['new_paperinfo']);
+                        });
+                    });
+                });
+
 
 
                 $(function() {
@@ -357,6 +378,7 @@
         </div>
 
         <div data-options="region:'center',title:'Citation Graph'">
+            <a id="rescan_all" href="#" class="easyui-linkbutton" plain="true">Rescan All</a>
             <form id="addpaper" method="get">
                 <div>
                     <input type="hidden" name="pname" value={{pname}}>

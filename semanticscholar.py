@@ -1,6 +1,7 @@
 from typing import Literal
 import requests
 import urllib.parse
+import logging
 from tenacity import (retry,
                       wait_fixed,
                       retry_if_exception_type,
@@ -76,6 +77,15 @@ class SemanticScholar:
         except:
             return None
 
+    def searchTitle(self, id: str, include_unknown_refs: bool=False) -> dict:
+        '''
+        http://api.semanticscholar.org/graph/v1/paper/search?query=literature+graph
+        '''
+        id = urllib.parse.quote_plus(id)
+        data = self.__get_data('search', id, include_unknown_refs)
+
+        return data
+
 
     def author(self, id: str) -> dict:
         '''Author lookup
@@ -115,10 +125,11 @@ class SemanticScholar:
 
         if method != 'search':
             url = '{}/{}/{}'.format(self.api_url, method, id)
+            if include_unknown_refs:
+                url += '?include_unknown_references=true'
         else:
-            url = '{}/{}?query={}'.format(self.api_search_url, method, id)
-        if include_unknown_refs:
-            url += '?include_unknown_references=true'
+            url = '{}/{}?query={}&limit=10&fields=title'.format(self.api_search_url, method, id)
+            logging.info(url)
         r = requests.get(url, timeout=self.timeout, headers=self.auth_header)
 
         if r.status_code == 200:

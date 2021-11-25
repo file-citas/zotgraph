@@ -30,10 +30,13 @@ class ZotApi:
         if title is None:
             return []
         keys = self.getItemIdByTitle(title)
-        if len(keys) == 0 or len(keys) > 1:
-            logging.info("Invalid Zotero title '%s'" % title)
+        if len(keys) == 0:
+            logging.warn("Invalid Zotero title (not found) '%s'" % title)
             return []
-        logging.info("Got Zotero keys '%s' for title '%s'" % (", ".join(keys), title))
+        if len(keys) > 1:
+            logging.warn("Invalid Zotero title (mutliple entries %d) '%s'" % (title, len(keys)))
+            return []
+        logging.debug("Got Zotero keys '%s' for title '%s'" % (", ".join(keys), title))
         return self.zot.top(itemKey=keys[0])
 
     def getItemIdByDOI(self, doi):
@@ -48,7 +51,7 @@ class ZotApi:
             logging.info("Invalid doi %s" % doi)
             return []
         try:
-            logging.info("Got Zotero keys '%s' for doi '%s'" % (", ".join(keys), doi))
+            logging.debug("Got Zotero keys '%s' for doi '%s'" % (", ".join(keys), doi))
             return self.zot.top(itemKey=keys[0])
         except Exception as e:
             logging.err("Could not get Zotero item by doi '%s': %s'" % (doi,e ))
@@ -68,8 +71,14 @@ class ZotApi:
         return ret
 
     def getAnnotations(self, key):
-        logging.info("get annotaitons for key %s" % key)
-        return self.df[self.df['Key'] == key]['Notes'].values
+        logging.debug("get annotations for key %s" % key)
+        annots = self.df[self.df['Key'] == key]['Notes'].values
+        #logging.info("Got annots for %s: %s" % (key, annots))
+        #ref_replace = self.__getAnnotRefs(paperId, annots)
+        #for key, replacement in ref_replace.items():
+        #    logging.debug("Replace %s ref %s -> %s" % (paperId, key, replacement))
+        #    annots = annots.replace(key, replacement)
+        return annots
 
     def extractRefs(self, key):
         try:
@@ -81,9 +90,10 @@ class ZotApi:
             logging.warn("No pdf for %s" % key)
             return {}, {}
         return RefExtract.extractRefs(pdfpath)
+
         
     def getPdfPath(self, key):
-        logging.info("get pdf path for key %s" % key)
+        logging.debug("get pdf path for key %s" % key)
         files = self.df[self.df['Key'] == key]['File Attachments'].values
         if len(files) == 1:
             for fn in files[0].split("; "):
