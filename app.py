@@ -3,7 +3,7 @@ app = Flask(__name__)
 app.config.from_pyfile('my_zotconfig.py')
 import logging
 FORMAT = "[%(filename)s:%(lineno)s - %(funcName)20s() ] %(message)s"
-logging.basicConfig(format=FORMAT, level=logging.INFO)
+logging.basicConfig(format=FORMAT, level=logging.DEBUG)
 
 import os
 import json

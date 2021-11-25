@@ -31,21 +31,6 @@ curl -X 'POST' \
         "-F", "'engine=v1'",
         ]
 
-        links = [None] * len(titles)
-        for rl in refs["reference_links"]:
-            try:
-                #buggy api
-                idx = int(rl["id"]) - 1
-            except:
-                continue
-            if "scholar_url" in rl.keys():
-                links[idx] = rl["scholar_url"]
-            elif "url" in rl.keys():
-                links[idx] = rl["url"]
-        return {
-            "titles": titles, 
-            "links": links,
-        }
 
     def __getAllTitles(refs, tistr="TI  - "):
         ris = refs["ris"]
@@ -70,17 +55,17 @@ curl -X 'POST' \
     def __parseRefs(refs):
         all_titles = RefExtract.__getAllTitles(refs)
         last_idx = len(refs["reference_links"])
-        titles = [None] * (last_idx+128)
-        links = [None] * (last_idx+128)
-        paperIds = [None] * (last_idx+128)
+        titles = {}
+        links = {}
+        paperIds = {}
         for rl in refs["reference_links"]:
             try:
                 #buggy api
-                idx = int(rl["id"]) - 1
+                idx = rl["id"]
             except:
                 logging.info("Broken ref %s" % json.dumps(rl, sort_keys=True, indent=2))
                 continue
-            logging.debug("Get ref for index %d" % idx)
+            logging.debug("Get ref for index %s" % idx)
             if "scholar_url" in rl.keys():
                 links[idx] = rl["scholar_url"]
             elif "url" in rl.keys():

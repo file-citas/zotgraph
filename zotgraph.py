@@ -1,8 +1,8 @@
 from pyzotero import zotero
 import logging
-FORMAT = "[%(filename)s:%(lineno)s - %(funcName)20s() ] %(message)s"
-logging.basicConfig(format=FORMAT)
-logging.basicConfig(format=FORMAT, level=logging.INFO)
+#FORMAT = "[%(filename)s:%(lineno)s - %(funcName)20s() ] %(message)s"
+#logging.basicConfig(format=FORMAT)
+#logging.basicConfig(format=FORMAT, level=logging.INFO)
 
 import itertools
 import networkx as nx
@@ -20,7 +20,8 @@ from semanticscholar import SemanticScholar
 from zotapi import ZotApi
 
 class ZotGraph:
-    P_REFS = re.compile("\[(?:\d+,*-*\s*)+\d+\]")
+    #P_REFS = re.compile("\[(?:\d+,*-*\s*)+\d+\]")
+    P_REFS = re.compile("(\[((?:,*-*\s*)?[\w\d\+]+)+])")
     P_REFS2 = re.compile("(\d+(<a href=\".*?\">\w<\/a>){1,3})")
     COLOR_INZOT='#383745'
     #COLOR_REF='#162347'
@@ -224,10 +225,10 @@ class ZotGraph:
         if zaitem and len(zaitem) > 0:
             zaitem[0]['extref'], zaitem[0]['refinfo'] = self.za.extractRefs(zaitem[0]['data']['key'])
             if zaitem[0]['extref'] and 'titles' in zaitem[0]['extref'].keys():
-                for i, ref_title in enumerate(zaitem[0]['extref']['titles']):
+                for idx, ref_title in zaitem[0]['extref']['titles'].items():
                     if ref_title is None:
                         continue
-                    logging.info("Search for %s" % ref_title)
+                    logging.debug("Search for %s" % ref_title)
                     #ref_sms = self.sm.searchTitle(ref_title)
                     #if ref_sms == {}:
                     #    logging.info("Failed to searc for title %s" % (ref_title))
@@ -245,7 +246,7 @@ class ZotGraph:
                             best_paperId = ref_sm['paperId']
                         if r == 100:
                             break
-                    zaitem[0]['extref']['paperIds'][i] = best_paperId
+                    zaitem[0]['extref']['paperIds'][idx] = best_paperId
 
         node = {
             'doi': doi,
@@ -269,7 +270,7 @@ class ZotGraph:
 
     def __getAnnotRefs(self, paperId, annots):
         refs_replace = {}
-        logging.debug("Ref paper %s" % paperId)
+        logging.info("Get annotated references for paperId %s" % paperId)
         #annots = self.za.getAnnotations(self.nodes[paperId]['zaitem'][0]['key'])[0]
 
         prefs = None
@@ -283,49 +284,61 @@ class ZotGraph:
             logging.debug("No extracted annotations for %s: %s" % (paperId, e))
             logging.debug(json.dumps(self.nodes[paperId]['zaitem'][0]))
             return {}
-        #p = re.compile("\[(?:\d+,*-*\s*)+\d+\]")
+        #logging.debug(annots)
         refs = ZotGraph.P_REFS.findall(annots)
-        for ref in refs:
+        logging.debug("REFS: %s" % refs)
+        for ref_group in refs:
+            ref = ref_group[0]
+            ref_replace = "%s" % ref
+            ref = ref.replace("[", "")
+            ref = ref.replace("]", "")
+            logging.debug("Scan Ref: %s" % ref)
             replacements = []
-            #logging.info("Ref: %s" % ref)
-            refstr = ref[1:-1]
+            refstr = ref #ref[1:-1]
             refstr_split = []
-            try:
-                refstr_split = refstr.split(", ")
-            except:
+            if "," in refstr:
+                refstr_split = refstr.split(",")
+            elif '-' in refstr:
                 refp_0, refp_1 = refstr.split("-")
                 refstr_split = map(lambda t: "%d" % t, range(refp_0, refp_1))
-            for refp in refstr_split: #refstr.split(", "):
+            else:
+                refstr_split = [refstr]
+
+            for refp in refstr_split:
+                l_ref = refp
+                refp = refp.replace(", ", "")
+                refp = refp.replace(" ", "")
+                logging.debug("Scan Ref part: '%s'" % refp)
                 new_ref = refp
-                #l_scholar = "%ss" % refp
-                #l_graph = "%sg" % refp
-                #l_ref = "%su" % refp
-                ref_idx = int(refp) - 1
-                if plinks is not None and len(plinks) > int(ref_idx):
+                ref_idx = refp
+                if plinks is not None and ref_idx in plinks.keys():
                     ref_url = plinks[ref_idx]
                     if ref_url is not None:
+                        logging.debug("Got ref link: %s" % ref_url)
                         l_ref = "<a href=\"%s\" id=\"paperref\">u</a>" % (ref_url)
                         new_ref += l_ref
-                if prefs is not None and len(prefs) > int(ref_idx):
+                if prefs is not None and ref_idx in prefs.keys():
                     ref_title = prefs[ref_idx]
-                    logging.debug(ref_title)
-                    #ref_paperId = self.__getPaperIdByTitle(ref_title)
-                    #if ref_paperId is not None:
-                    if refids is not None and len(refids) > int(ref_idx):
-                        ref_paperId = refids[ref_idx]
-                        if ref_paperId is not None:
-                            ref_linkurl = "https://www.semanticscholar.org/paper/%s" % ref_paperId
-                            l_scholar = "<a href=\"%s\" id=\"paperref\">s</a>" % (ref_linkurl)
-                            new_ref += l_scholar
-                            if self.g.has_node(ref_paperId):
-                                l_graph = "<a href=\"javascript:highlight_edge(\'%s\', \'%s\');\" id=\"paperref\">g</a>" % (paperId, ref_paperId)
-                                new_ref += l_graph
+                    logging.debug("Got ref title: %s" % ref_title)
+                if refids is not None and ref_idx in refids.keys():
+                    ref_paperId = refids[ref_idx]
+                    if ref_paperId is not None:
+                        logging.debug("Got ref paperId: %s" % ref_paperId)
+                        ref_linkurl = "https://www.semanticscholar.org/paper/%s" % ref_paperId
+                        l_scholar = "<a href=\"%s\" id=\"paperref\">s</a>" % (ref_linkurl)
+                        new_ref += l_scholar
+                        if self.g.has_node(ref_paperId):
+                            l_graph = "<a href=\"javascript:highlight_edge(\'%s\', \'%s\');\" id=\"paperref\">g</a>" % (paperId, ref_paperId)
+                            new_ref += l_graph
                 replacements.append(new_ref)
 
-            refs_replace[ref] = "[%s]" % ", ".join(replacements)
+            refs_replace[ref_replace] = "[%s]" % ", ".join(replacements)
+        
+        logging.debug("Got annotated references for paperId %s" % paperId)
         return refs_replace
 
     def __getAnnotations(self, paperId):
+        logging.info("Get annotations references for paperId %s" % paperId)
         annots = self.za.getAnnotations(self.nodes[paperId]['zaitem'][0]['key'])[0]
         #logging.info("Got annots for %s: %s" % (paperId, annots))
         ref_replace = self.__getAnnotRefs(paperId, annots)
@@ -335,6 +348,7 @@ class ZotGraph:
         return annots 
 
     def __getPaperInfo(self, paperId):
+        logging.info("Get paper information for %s" % paperId)
         try:
             abstract = self.nodes[paperId]['smitem']["abstract"] + '\n'
         except Exception as e:
@@ -377,7 +391,7 @@ class ZotGraph:
             logging.error("No node for paperid %s")
             return
         
-        #logging.info("About %s" % paperId)
+        logging.info("Get Mentions about %s" % paperId)
         ret = ""
         for ref in self.nodes[paperId]['smitem']["citations"]:
             ref_id = ref["paperId"]
