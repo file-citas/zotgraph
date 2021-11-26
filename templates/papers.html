@@ -16,14 +16,132 @@
 
 <body>
     <script type="text/javascript">
-        var selectedNode=undefined;
-        var selectedRow=undefined;
+        var selectedLayout = "{{selectedLayout}}"; //"RANDOM";
+        var selectedNode = undefined;
+        var selectedRow = undefined;
         var network;
         var container;
-        var options, data;
+        var data;
         var edges = new vis.DataSet();
         var nodes = new vis.DataSet();
         var paperinfo = {};
+        var options_random = {
+            "configure": {
+                "enabled": true,
+            },
+            "edges": {
+                "color": {
+                    "inherit": false
+                },
+                "smooth": {
+                    "enabled": false,
+                    "type": "continuous",
+                },
+                "arrows": {
+                    "to": {
+                        "enabled": true,
+                        "scaleFactor": 0.8,
+                    },
+                },
+                "color": {
+                    "highlight": "#ff0000",
+                },
+                "selectionWidth": function (width) { return width * 3; },
+
+            },
+            "interaction": {
+                "dragNodes": true,
+                "hideEdgesOnDrag": false,
+                "hideNodesOnDrag": false
+            },
+            "physics": {
+                "enabled": true,
+                "repulsion": {
+                    "centralGravity": 0.002,
+                    "damping": 0.1,
+                    "nodeDistance": 100,
+                    "springConstant": 0.00005,
+                    "springLength": 300
+                },
+                "solver": "repulsion",
+                "stabilization": {
+                    "enabled": true,
+                    "fit": true,
+                    "iterations": 500,
+                    "onlyDynamicEdges": false,
+                    "updateInterval": 30
+                }
+            },
+            "layout": {
+                "improvedLayout": true,
+                "hierarchical": {
+                    "enabled": false,
+                    "direction": "UD",
+                    "sortMethod": "directed",
+                    "nodeSpacing": 300,
+                    "treeSpacing": 600,
+                },
+            },
+        };
+
+        var options_hierachical = {
+            "configure": {
+                "enabled": true,
+            },
+            "edges": {
+                "color": {
+                    "inherit": false
+                },
+                "smooth": {
+                    "enabled": false,
+                    "type": "continuous",
+                },
+                "arrows": {
+                    "to": {
+                        "enabled": true,
+                        "scaleFactor": 0.8,
+                    },
+                },
+                "color": {
+                    "highlight": "#ff0000",
+                },
+                "selectionWidth": function (width) { return width * 3; },
+
+            },
+            "interaction": {
+                "dragNodes": true,
+                "hideEdgesOnDrag": false,
+                "hideNodesOnDrag": false
+            },
+            "physics": {
+                "enabled": true,
+                "repulsion": {
+                    "centralGravity": 0.002,
+                    "damping": 0.1,
+                    "nodeDistance": 100,
+                    "springConstant": 0.00005,
+                    "springLength": 300
+                },
+                "solver": "repulsion",
+                "stabilization": {
+                    "enabled": true,
+                    "fit": true,
+                    "iterations": 500,
+                    "onlyDynamicEdges": false,
+                    "updateInterval": 30
+                }
+            },
+            "layout": {
+                "improvedLayout": true,
+                "hierarchical": {
+                    "enabled": true,
+                    "direction": "UD",
+                    "sortMethod": "directed",
+                    "nodeSpacing": 300,
+                    "treeSpacing": 600,
+                },
+            },
+        };
 
         function highlight_edge(p0, p1) {
             //alert(p0 + "-" + p1);
@@ -31,13 +149,13 @@
             es = edges.get().filter(function (edge) {
                 return edge.from === p0 && edge.to === p1;
             });
-            if(es.length>0) {
+            if (es.length > 0) {
                 network.selectEdges([es[0]['id']]);
             }
         }
         function updateSelection(paperId) {
             console.log("Update selection " + paperId)
-            if(paperinfo[paperId] == undefined) {
+            if (paperinfo[paperId] == undefined) {
                 console.error("No info for " + paperId)
             } else {
                 var pi = document.getElementById('paperinfo');
@@ -53,35 +171,35 @@
                 nodes.update(new_node['node_data']);
             }
             var n_rows = $('#papertable').datagrid('getRows').length;
-            for (let i=0; i<n_rows; i++) {
-                $('#papertable').datagrid('refreshRow',i);
+            for (let i = 0; i < n_rows; i++) {
+                $('#papertable').datagrid('refreshRow', i);
             }
             $('#papertable').datagrid('reload');
         }
 
-        $(function() {
+        $(function () {
             $('#papertable').datagrid({
-                rowStyler:function(index,row){
+                rowStyler: function (index, row) {
                     //console.log(row)
-                    if(row == undefined) {
+                    if (row == undefined) {
                         return 'background-color:white';
                     }
                     //console.log(row.nodeId);
-                    if(row.nodeId == undefined) {
+                    if (row.nodeId == undefined) {
                         return 'background-color:white';
                     }
 
                     rowNodeId = row.nodeId;
-                    if(rowNodeId==selectedNode) {
+                    if (rowNodeId == selectedNode) {
                         return 'background-color:white';
                     }
                     //console.log("Set row color for " + rowNodeId);
                     //gNodes = nodes.get({'id': rowNodeId})
                     gNodes = [network.body.data.nodes._data[rowNodeId]];
                     //console.log(gNodes.length)
-                    for(let i=0; i<gNodes.length; i++) {
+                    for (let i = 0; i < gNodes.length; i++) {
                         gNode = gNodes[i];
-                        if(gNode['id'] == rowNodeId) {
+                        if (gNode != undefined && gNode['id'] == rowNodeId) {
                             //console.log(gNode)
                             new_color = gNode['color'];
                             console.log("Set row color for " + rowNodeId + " -> " + new_color);
@@ -97,35 +215,35 @@
             n = new_nodes.length;
             for (let i = 0; i < n; i++) {
                 new_node = new_nodes[i];
-                console.log("Add node " + new_node['node_data']['id']);
+                console.log("Add node " + new_node['node_data']['level'] + " " + new_node['node_data']['id']);
                 nodes.update(new_node['node_data']);
                 var new_row = {
-                    year:new_node['year'],
-                    nc:new_node['ncit'],
-                    author:new_node['author'],
-                    title:new_node['title']
+                    year: new_node['year'],
+                    nc: new_node['ncit'],
+                    author: new_node['author'],
+                    title: new_node['title'],
                 };
                 needs_row = true;
                 rows = last_row = $('#papertable').datagrid('getRows')
                 n_rows = rows.length;
-                for(let i=0; i<n_rows; i++) {
+                for (let i = 0; i < n_rows; i++) {
                     //$('#papertable').datagrid('refreshRow',i);
-                    if(rows[i]['nodeId'] == new_node['node_data']['id']) {
+                    if (rows[i]['nodeId'] == new_node['node_data']['id']) {
                         needs_row = false;
                         //break;
                     }
                 }
-                if(needs_row) {
+                if (needs_row) {
                     console.log("Add row " + new_row['title'] + ", " + new_row['year'] + ", " + new_row['ncit'] + ", " + new_row['author']);
-                    $('#papertable').datagrid('appendRow',{
-                        year:new_node['year'],
-                        nc:new_node['ncit'],
-                        author:new_node['author'],
-                        title:new_node['title'],
-                        nodeId:new_node['node_data']['id']
+                    $('#papertable').datagrid('appendRow', {
+                        year: new_node['year'],
+                        nc: new_node['ncit'],
+                        author: new_node['author'],
+                        title: new_node['title'],
+                        nodeId: new_node['node_data']['id']
                     });
                     $('#papertable').datagrid('reload');
-                    last_row = $('#papertable').datagrid('getRows').length-1;
+                    last_row = $('#papertable').datagrid('getRows').length - 1;
                     new_row = $('#papertable').datagrid('getRows')[last_row];
                     new_row.id = "row_" + new_node['node_data']['id'];
                     $('#papertable').datagrid('reload');
@@ -144,110 +262,94 @@
                 paperinfo[new_pi['id']] = new_pi['html'];
             }
         }
+
         function drawGraph() {
+            showLoader();
             console.log("drawGrap");
             var container = document.getElementById('citgraph');
 
             data = {
-                nodes: nodes,
-                edges: edges
+                nodes: nodes, //new vis.DataSet(),
+                edges: edges, //new vis.DataSet(),
             };
-            var options = {
-                "configure": {
-                    "enabled": false
-                },
-                "edges": {
-                    "color": {
-                        "inherit": false
-                    },
-                    "smooth": {
-                        "enabled": false,
-                        "type": "continuous"
-                    },
-                        "arrows": {
-                        "to": {
-                            "enabled": true,
-                            "scaleFactor": 0.8,
-                        },
-                    },
-                    "color": {
-                        "highlight": "#ff0000",
-                    },
-                    "selectionWidth": function (width) {return width*3;},
-                    
-                },
-                "interaction": {
-                    "dragNodes": true,
-                    "hideEdgesOnDrag": false,
-                    "hideNodesOnDrag": false
-                },
-                "physics": {
-                    "enabled": true,
-                    "repulsion": {
-                        "centralGravity": 0.002,
-                        "damping": 0.1,
-                        "nodeDistance": 100,
-                        "springConstant": 0.00005,
-                        "springLength": 300
-                    },
-                    "solver": "repulsion",
-                    "stabilization": {
-                        "enabled": true,
-                        "fit": true,
-                        "iterations": 1000,
-                        "onlyDynamicEdges": false,
-                        "updateInterval": 50
-                    }
-                },    
-                //"layout": {
-                //    "hierarchical": {
-                //        "enabled": true,
-                //        //"direction": "directionInput",
-                //    },
-                //},
-            };
-
-            network = new vis.Network(container, data, options);
+            if(selectedLayout == "HIERACHICAL") {
+                console.log("HIERACHICAL");
+                var network_options = JSON.parse(JSON.stringify(options_hierachical));
+                network = new vis.Network(container, data, network_options);
+            } else {
+                console.log("RANDOM");
+                var network_options = JSON.parse(JSON.stringify(options_random));
+                network = new vis.Network(container, data, network_options);
+            }
             updateGraph({{nodes|tojson}}, {{edges|tojson}}, {{paperinfo|tojson}});
 
-            network.on("click", function(params) {
+            network.on("click", function (params) {
                 var nodeId = params.nodes.toString();
                 selectedNode = nodeId;
                 var row_id = "row_" + selectedNode;
                 console.log("Seaching for " + row_id);
                 var n_rows = $('#papertable').datagrid('getRows').length;
                 var rows = $('#papertable').datagrid('getRows');
-                var row_index=undefined;
-                for (let i=0; i<n_rows; i++) {
-                    //console.log(i);
-                    //console.log(rows[i]);
-                    if(rows[i].id==row_id) {
+                var row_index = undefined;
+                for (let i = 0; i < n_rows; i++) {
+                    if (rows[i].id == row_id) {
                         row_index = i;
-                        break; 
+                        break;
                     }
                 }
-                if(row_index==undefined) {
+                if (row_index == undefined) {
                     console.log("Could not find row");
                     return;
                 }
-                //$('#papertable').datagrid('selectRow', row_index);
                 var lastSelectedRow = selectedRow;
                 selectedRow = row_index;
-                $('#papertable').datagrid('refreshRow',lastSelectedRow);
-                $('#papertable').datagrid('refreshRow',selectedRow);
+                $('#papertable').datagrid('refreshRow', lastSelectedRow);
+                $('#papertable').datagrid('refreshRow', selectedRow);
                 console.log("Selected Node " + selectedNode);
                 console.log("Selected row " + selectedRow);
-                //for (let i=0; i<n_rows; i++) {
-                //    $('#papertable').datagrid('refreshRow',i);
-                //}
-
                 updateSelection(selectedNode);
             });
+
+            network.on("stabilized", function () {
+                console.log("Network Stabilized");
+                network.setOptions({ physics: false });
+            });
             return network;
+        }
+
+        function showLoader() {
+            console.log("XXXX");
+            var x = document.getElementById("loader");
+            x.style.display = "block";
+        }
+
+        function hideLoader() {
+            console.log("XXXX0");
+            var x = document.getElementById("loader");
+            x.style.display = "none";
         }
     </script>
 
     <div class="easyui-layout" fit="true">
+        <div class="loader" id="loader">
+            <div class="loader-inner">
+              <div class="loader-line-wrap">
+                <div class="loader-line"></div>
+              </div>
+              <div class="loader-line-wrap">
+                <div class="loader-line"></div>
+              </div>
+              <div class="loader-line-wrap">
+                <div class="loader-line"></div>
+              </div>
+              <div class="loader-line-wrap">
+                <div class="loader-line"></div>
+              </div>
+              <div class="loader-line-wrap">
+                <div class="loader-line"></div>
+              </div>
+            </div>
+        </div>
         <div data-options=" region:'west',split:true" title="Paper List" style="width:300px;">
             <div style="padding:5px;background:#fafafa;width:500px;border:1px solid #ccc">
                 <a id="rescan" href="#" class="easyui-linkbutton" plain="true">Rescan</a>
@@ -255,7 +357,8 @@
                 <a id="getrefs" href="#" class="easyui-linkbutton" plain="true">References</a>
                 <a id="filter" href="#" class="easyui-linkbutton" plain="true">Filter</a>
             </div>
-            <table class="easyui-datagrid" id="papertable" data-options="method:'get',nowrap:false,border:false,singleSelect:true,fit:true,fitColumns:true,remoteSort:false,multiSort:true,onClickCell:onClickCell">
+            <table class="easyui-datagrid" id="papertable"
+                data-options="method:'get',nowrap:false,border:false,singleSelect:true,fit:true,fitColumns:true,remoteSort:false,multiSort:true,onClickCell:onClickCell">
                 <thead>
                     <tr>
                         <th data-options="field:'year',sortable:true" width="10">Year</th>
@@ -268,99 +371,148 @@
             </table>
             <script type="text/javascript">
 
-                function changeColoring(newValue,oldValue){
-                    if(oldValue!=newValue) {
+                function changeColoring(newValue, oldValue) {
+                    if (oldValue != newValue) {
                         $.getJSON("{{url_for('setcolor')}}", {
                             'pname': "{{pname}}",
                             'color': newValue,
-                        }).done(function(data) {
+                        }).done(function (data) {
                             updateColor(data['new_nodes']);
                         });
                     }
                 }
 
-                function onClickCell(index, field){
+                function resetGraph() {
+                    gNodes = nodes.get();
+                    n_nodes = gNodes.length;
+                    for(let i=0; i<n_nodes; i++) {
+                        console.log("remove node " + i);
+                        nodes.remove(gNodes[i]);
+                    }
+                    $.getJSON("{{url_for('getgraph')}}", {
+                            'pname': "{{pname}}",
+                            'paperid': selectedNode,
+                        }).done(function (data) {
+                            updateGraph(data['new_nodes'], data['new_edges'], data['new_paperinfo']);
+                    });
+                }
+
+                function changeLayout(newValue, oldValue) {
+                    console.log(oldValue);
+                    console.log(newValue);
+                    if (oldValue != newValue) {
+                        //resetGraph();
+                        //drawGraph();
+                        if (newValue == "HIERACHICAL") {
+                            console.log("hierachical layout");
+                            //selectedLayout = "HIERACHICAL";
+                            //drawGraph();
+                            network.stabilize();
+                            network.setOptions(JSON.parse(JSON.stringify(options_hierachical)));
+
+                            network.stabilize();
+                        } else {
+                            console.log("random layout");
+                            //selectedLayout = "RANDOM";
+                            network.stabilize();
+                            network.setOptions(JSON.parse(JSON.stringify(options_random)));
+                            network.stabilize();
+                            //drawGraph();
+                        }
+                    }
+                }
+
+                function onClickCell(index, field) {
                     console.log("clicked " + index);
                     row = $('#papertable').datagrid('getRows')[index];
                     selectedNode = row.id.split("_")[1];
                     //selectedRow = index;
                     var lastSelectedRow = selectedRow;
                     selectedRow = index;
-                    $('#papertable').datagrid('refreshRow',lastSelectedRow);
-                    $('#papertable').datagrid('refreshRow',selectedRow);
+                    $('#papertable').datagrid('refreshRow', lastSelectedRow);
+                    $('#papertable').datagrid('refreshRow', selectedRow);
                     network.selectNodes([selectedNode]);
                     console.log("Selected Node " + selectedNode);
                     console.log("Selected row " + selectedRow);
-                    
+
                     var n_rows = $('#papertable').datagrid('getRows').length;
                     //for (let i=0; i<n_rows; i++) {
                     //    $('#papertable').datagrid('refreshRow',i);
                     //}
                     updateSelection(selectedNode);
                 }
-                $(function() {
-                    $('#getcits').bind('click', function(e) {
-                        if(selectedNode==undefined || selectedRow==undefined) {
+                $(function () {
+                    $('#getcits').bind('click', function (e) {
+                        if (selectedNode == undefined || selectedRow == undefined) {
                             return;
                         }
+
+                        showLoader();
                         $.getJSON("{{url_for('getcits')}}", {
                             'pname': "{{pname}}",
                             'paperid': selectedNode,
-                        }).done(function(data) {
+                        }).done(function (data) {
                             updateGraph(data['new_nodes'], data['new_edges'], data['new_paperinfo']);
+                            hideLoader();
                         });
                     });
                 });
 
-                $(function() {
-                    $('#rescan').bind('click', function(e) {
-                        if(selectedNode==undefined || selectedRow==undefined) {
+                $(function () {
+                    $('#rescan').bind('click', function (e) {
+                        showLoader();
+                        if (selectedNode == undefined || selectedRow == undefined) {
                             return;
                         }
                         $.getJSON("{{url_for('rescan')}}", {
                             'pname': "{{pname}}",
                             'paperid': selectedNode,
-                        }).done(function(data) {
+                        }).done(function (data) {
                             updateGraph(data['new_nodes'], data['new_edges'], data['new_paperinfo']);
+                            hideLoader();
                         });
                     });
                 });
 
-                $(function() {
-                    $('#rescan_all').bind('click', function(e) {
+                $(function () {
+                    $('#rescan_all').bind('click', function (e) {
+                        showLoader();
                         $.getJSON("{{url_for('rescan_all')}}", {
                             'pname': "{{pname}}",
-                        }).done(function(data) {
+                        }).done(function (data) {
                             updateGraph(data['new_nodes'], data['new_edges'], data['new_paperinfo']);
+                            hideLoader();
                         });
                     });
                 });
 
 
 
-                $(function() {
-                    $('#getrefs').bind('click', function(e) {
-                        if(selectedNode==undefined || selectedRow==undefined) {
+                $(function () {
+                    $('#getrefs').bind('click', function (e) {
+                        showLoader();
+                        if (selectedNode == undefined || selectedRow == undefined) {
                             return;
                         }
                         $.getJSON("{{url_for('getrefs')}}", {
                             'pname': "{{pname}}",
                             'paperid': selectedNode,
-                        }).done(function(data) {
+                        }).done(function (data) {
                             updateGraph(data['new_nodes'], data['new_edges'], data['new_paperinfo']);
+                            hideLoader();
                         });
                     });
                 });
 
-                $(function() {
-                    $('#filter').bind('click', function(e) {
-                        if(selectedNode==undefined || selectedRow==undefined) {
+                $(function () {
+                    $('#filter').bind('click', function (e) {
+                        if (selectedNode == undefined || selectedRow == undefined) {
                             return;
                         }
                         $.getJSON("{{url_for('filter')}}", {
                             'pname': "{{pname}}",
                             'paperid': selectedNode,
-                        }).done(function(data) {
+                        }).done(function (data) {
                             nodes.remove({
                                 "id": selectedNode
                             });
@@ -379,6 +531,13 @@
 
         <div data-options="region:'center',title:'Citation Graph'">
             <a id="rescan_all" href="#" class="easyui-linkbutton" plain="true">Rescan All</a>
+            <a id="switch_layout" href="{{url_for('switch_layout', pname=pname)}}" class="easyui-linkbutton" plain="true">Switch Layout</a>
+            <select id="color" class="easyui-combobox" name="dept" style="width:200px;" data-options="onChange:changeColoring">
+                <option value="COLLECTION">Collection</option>
+                <option value="AUTHOR">Author</option>
+                <option value="YEAR">Year</option>
+                <option value="NCIT">Citations</option>
+            </select>
             <form id="addpaper" method="get">
                 <div>
                     <input type="hidden" name="pname" value={{pname}}>
@@ -386,18 +545,12 @@
                     <input class="easyui-validatebox" type="text" name="paperid" />
                 </div>
             </form>
-            <select id="color" class="easyui-combobox" name="dept" style="width:200px;" data-options="onChange:changeColoring">
-                <option value="COLLECTION">Collection</option>
-                <option value="AUTHOR">Author</option>
-                <option value="YEAR">Year</option>
-                <option value="NCIT">Citations</option>
-            </select>
             <script type="text/javascript">
                 var url = "{{ url_for('addpaper') }}";
                 $('#addpaper').form({
                     url: url,
                     datatype: "json",
-                    success: function(res) {
+                    success: function (res) {
                         data = JSON.parse(res);
                         updateGraph(data['new_nodes'], data['new_edges'], data['new_paperinfo']);
                     }
@@ -405,8 +558,10 @@
             </script>
             <div id="citgraph" style="height:100%;">
                 <script type="text/javascript">
-                    $(document).ready(function(){
-                        drawGraph(); 
+                    $(document).ready(function () {
+                        showLoader();
+                        drawGraph();
+                        hideLoader();
                     });
                 </script>
             </div>

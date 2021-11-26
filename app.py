@@ -3,7 +3,7 @@ app = Flask(__name__)
 app.config.from_pyfile('my_zotconfig.py')
 import logging
 FORMAT = "[%(filename)s:%(lineno)s - %(funcName)20s() ] %(message)s"
-logging.basicConfig(format=FORMAT, level=logging.DEBUG)
+logging.basicConfig(format=FORMAT, level=logging.INFO)
 
 import os
 import json
@@ -15,6 +15,7 @@ ID_FILTER_FN="paperIds.filter"
 CONF_FILTER_FN="filter.conf"
 
 projects = {}
+selectedLayout = "HIERACHICAL"
 
 def getProjectList():
     pl = []
@@ -110,6 +111,37 @@ def zotcit():
         nodes=nodes,
         edges=edges,
         paperinfo=paperInfo,
+        selectedLayout=selectedLayout,
+        pname=pname
+    )
+
+@app.route('/switch_layout')
+def switch_layout():
+    global selectedLayout
+    pname = request.args.get("pname")
+    logging.info("switch layout for %s" % pname)
+    if selectedLayout == "RANDOM":
+        logging.info("Switch layout to HIERACHICAL")
+        selectedLayout = "HIERACHICAL"
+    else:
+        logging.info("Switch layout to RANDOM")
+        selectedLayout = "RANDOM"
+    return redirect(url_for('zotcit', pname=pname)) 
+
+@app.route('/getgraph')
+def getgraph():
+    pname = request.args.get("pname")
+    logging.info("getgraph project %s" % pname)
+    nodes = []
+    edges = []
+    nodes, edges = projects[pname].getGraph()
+    paperInfo = projects[pname].getPaperInfo()
+    return render_template(
+        "papers.html",
+        nodes=nodes,
+        edges=edges,
+        paperinfo=paperInfo,
+        selectedLayout=selectedLayout,
         pname=pname
     )
 
@@ -121,7 +153,7 @@ def addpaper():
     new_edges = []
     new_nodes = []
     if paperId is not None and paperId != "":
-        new_nodes, new_edges, new_paperinfo = projects[pname].addPaperId(paperId)
+        new_nodes, new_edges, new_paperinfo = projects[pname].addPaperId(paperId=paperId)
         projects[pname].saveGraph()
     res = {
         'new_nodes': new_nodes,
@@ -139,7 +171,7 @@ def getcits():
     new_edges = []
     new_nodes = []
     if paperId is not None and paperId != "":
-        new_nodes, new_edges, new_paperinfo = projects[pname].addLinks(paperId, onlyCit=True)
+        new_nodes, new_edges, new_paperinfo = projects[pname].addLinks(paperId=paperId, onlyCit=True)
         projects[pname].saveGraph()
     res = {
         'new_nodes': new_nodes,
@@ -158,7 +190,7 @@ def getrefs():
     new_nodes = []
     new_paperinfo = []
     if paperId is not None and paperId != "":
-        new_nodes, new_edges, new_paperinfo = projects[pname].addLinks(paperId, onlyRef=True)
+        new_nodes, new_edges, new_paperinfo = projects[pname].addLinks(paperId=paperId, onlyRef=True)
         projects[pname].saveGraph()
     res = {
         'new_nodes': new_nodes,
@@ -177,7 +209,7 @@ def rescan():
     new_nodes = []
     new_paperinfo = []
     if paperId is not None and paperId != "":
-        new_nodes, new_edges, new_paperinfo = projects[pname].rescan(paperId)
+        new_nodes, new_edges, new_paperinfo = projects[pname].rescan(paperId=paperId)
     res = {
         'new_nodes': new_nodes,
         'new_edges': new_edges,
@@ -208,7 +240,7 @@ def filter():
     paperId = request.args.get("paperid")
     logging.info("Filter PaperId %s" % paperId)
     if paperId is not None:
-        projects[pname].removePaperId(paperId)
+        projects[pname].removePaperId(paperId=paperId)
         projects[pname].saveGraph()
     return {"status": "OK"}
 
