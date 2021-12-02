@@ -4,6 +4,7 @@ ZotGraph correlates information from your Zotero Database with Semantic Scholar.
 # Dependencies:
 * [PyZotero](https://pyzotero.readthedocs.io/en/latest/)
 * [Flask](https://pypi.org/project/Flask/)
+* [EasyUi](https://www.jeasyui.com/index.php)
 
 # Setup
 ```
@@ -19,6 +20,8 @@ Edit `zotgraph/zotconfig.py`
  * N_CACHE: zotgrap/ncache
  * API_KEY: Your personal library ID is available [here](https://www.zotero.org/settings/keys), in the section Your userID for use in API calls. You have to sign in first
  * LCSV: The path you your exported Zotero library. From Zotero click file->Export Library and select CSV with 'export Notes'.
+
+Download [EasyUi](https://www.jeasyui.com/download/list.php) and extract it into `zotgraph/static/easyui/`
  
 # Run
 ```
