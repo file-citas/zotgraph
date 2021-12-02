@@ -1,6 +1,8 @@
 import logging
 import subprocess
 import json
+from datetime import timedelta
+from ratelimit import limits, sleep_and_retry
 from fuzzywuzzy import fuzz
 from fuzzywuzzy import process
 
@@ -78,11 +80,22 @@ curl -X 'POST' \
         }
 
 
-    def extractRefs(pdfpath):
+
+    @sleep_and_retry
+    @limits(calls=1, period=timedelta(seconds=10).total_seconds())
+    def __getRefs(pdfpath):
         this_curl_cmd = RefExtract.CURL_CMD + ['-F'] + ["'file=@\"%s\";type=application/pdf'" % pdfpath]
         logging.debug("Executing %s" % " ".join(this_curl_cmd))
         p = subprocess.Popen(" ".join(this_curl_cmd), shell=True, stdout=subprocess.PIPE)
         pout, _ = p.communicate()
+        return pout
+
+    def extractRefs(pdfpath):
+        #this_curl_cmd = RefExtract.CURL_CMD + ['-F'] + ["'file=@\"%s\";type=application/pdf'" % pdfpath]
+        #logging.debug("Executing %s" % " ".join(this_curl_cmd))
+        #p = subprocess.Popen(" ".join(this_curl_cmd), shell=True, stdout=subprocess.PIPE)
+        #pout, _ = p.communicate()
+        pout = __getRefs(pdfpath)
         try:
             refs = json.loads(pout.decode('utf-8'))
         except Exception as e:

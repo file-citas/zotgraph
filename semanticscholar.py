@@ -2,6 +2,8 @@ from typing import Literal
 import requests
 import urllib.parse
 import logging
+from datetime import timedelta
+from ratelimit import limits, sleep_and_retry
 from tenacity import (retry,
                       wait_fixed,
                       retry_if_exception_type,
@@ -18,7 +20,7 @@ class SemanticScholar:
 
     def __init__(
                 self,
-                timeout: int=2,
+                timeout: int=240,
                 api_key: str=None,
                 api_url: str=None
             ) -> None:
@@ -98,9 +100,11 @@ class SemanticScholar:
 
         return data
 
+    @sleep_and_retry
+    @limits(calls=1, period=timedelta(seconds=10).total_seconds())
     @retry(
-        wait=wait_fixed(30),
-        retry=retry_if_exception_type(ConnectionRefusedError),
+        wait=wait_fixed(240),
+        retry=(retry_if_exception_type(ConnectionRefusedError) | retry_if_exception_type(PermissionError) | retry_if_exception_type(TimeoutError)),
         stop=stop_after_attempt(10)
     )
     def __get_data(
@@ -129,9 +133,12 @@ class SemanticScholar:
                 url += '?include_unknown_references=true'
         else:
             url = '{}/{}?query={}&limit=10&fields=title'.format(self.api_search_url, method, id)
-            logging.info(url)
+            
+        
+        logging.info("Semantic Scholar %s" %(url))
         r = requests.get(url, timeout=self.timeout, headers=self.auth_header)
 
+        logging.info("Semantic Scholar %d %s" %(r.status_code, url))
         if r.status_code == 200:
             data = r.json()
             if len(data) == 1 and 'error' in data:
@@ -140,5 +147,7 @@ class SemanticScholar:
             raise PermissionError('HTTP status 403 Forbidden.')
         elif r.status_code == 429:
             raise ConnectionRefusedError('HTTP status 429 Too Many Requests.')
+        elif r.status_code == 504:
+            raise TimeoutError('HTTP status 504 Connection Timeout.')
 
         return data

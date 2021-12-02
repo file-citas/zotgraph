@@ -34,9 +34,9 @@ class ZotApi:
             logging.warn("Invalid Zotero title (not found) '%s'" % title)
             return []
         if len(keys) > 1:
-            logging.warn("Invalid Zotero title (mutliple entries %d) '%s'" % (title, len(keys)))
+            logging.warn("Invalid Zotero title (mutliple entries %s) '%s'" % (title, len(keys)))
             return []
-        logging.debug("Got Zotero keys '%s' for title '%s'" % (", ".join(keys), title))
+        logging.info("Got Zotero keys '%s' for title '%s'" % (", ".join(keys), title))
         return self.zot.top(itemKey=keys[0])
 
     def getItemIdByDOI(self, doi):
@@ -71,8 +71,11 @@ class ZotApi:
         return ret
 
     def getAnnotations(self, key):
-        logging.debug("get annotations for key %s" % key)
+        logging.info("get annotations for key %s" % key)
         annots = self.df[self.df['Key'] == key]['Notes'].values
+        if len(annots) < 1 or not isinstance(annots[0], str):
+            logging.warn("No annotations for %s" % key)
+            raise Exception("No annots for key %s" % key)
         #logging.info("Got annots for %s: %s" % (key, annots))
         #ref_replace = self.__getAnnotRefs(paperId, annots)
         #for key, replacement in ref_replace.items():

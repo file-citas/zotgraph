@@ -18,6 +18,8 @@ from fuzzywuzzy import fuzz
 from fuzzywuzzy import process
 from semanticscholar import SemanticScholar
 from zotapi import ZotApi
+from datetime import timedelta
+from ratelimit import limits, sleep_and_retry
 
 PAPER_DEDUPS= {
     "57cee3a90bb0caa822fc188b083a01aa1e17cca9": "d896ef2a393eb8022446a7d8951432ac8f424bbd",
@@ -30,13 +32,14 @@ PAPER_DEDUPS_INV = {v: k for k, v in PAPER_DEDUPS.items()}
 def dedup_paper(func):
     def wrapper(*args, **kwargs):
         if "paperId" in kwargs.keys() and kwargs['paperId'] in PAPER_DEDUPS.keys():
-            logging.debug("Deduplicate paperId %s -> %s" % (kwargs["paperId"], PAPER_DEDUPS[kwargs["paperId"]]))
+            logging.info("Deduplicate paperId %s -> %s" % (kwargs["paperId"], PAPER_DEDUPS[kwargs["paperId"]]))
             kwargs["paperId"] = PAPER_DEDUPS[kwargs["paperId"]]
         return func(*args,**kwargs)
     return wrapper
 
 
 class ZotGraph:
+    NO_ANNOTS_STR = "NO ANNOTATIONS"
     #P_REFS = re.compile("\[(?:\d+,*-*\s*)+\d+\]")
     P_REFS = re.compile("(\[((?:,*-*\s*)?[\w\d\+]+)+])")
     P_REFS2 = re.compile("(\d+(<a href=\".*?\">\w<\/a>){1,3})")
@@ -61,7 +64,7 @@ class ZotGraph:
         self.nodes = {}
         self.ncachefn = ncache
         self.htmldir = htmldir
-        self.all_years = set()
+        self.year_to_paperid = {}
         self.c_min_year = 2050 #self.min_year
         self.c_max_year = 0
         self.c_min_ncit = 10000
@@ -81,12 +84,6 @@ class ZotGraph:
         self.color["NCIT"] = plt.cm.ScalarMappable(cmap=seqmap, norm=norm_ncit)
         #self.color["NCIT"] = plt.cm.PuBuGn(np.linspace(0, 1.0, 100))
         self.colcolors = {}
-        self.graph_path = graph_path
-        if os.path.exists(graph_path):
-            self.__loadGraph()
-        else:
-            self.g = nx.DiGraph()
-
         self.filterfn = filterfn
         self.filterIds = set()
         if os.path.exists(filterfn):
@@ -95,7 +92,14 @@ class ZotGraph:
                     l = l.rstrip()
                     logging.debug("Add filter %s" % l)
                     self.filterIds.add(l)
+        
+        self.graph_path = graph_path
+        if os.path.exists(graph_path):
+            self.__loadGraph()
+        else:
+            self.g = nx.DiGraph()
     
+    @dedup_paper
     def __getNodeInfo(self, paperId=None):
         smitem = self.nodes[paperId]['smitem']
         author = "?"
@@ -153,9 +157,11 @@ class ZotGraph:
                 }
             }
         try:
-            jsnode['node_data']['level'] = self.year_to_level[int(ni['year'])]
-        except:
-            jsnode['node_data']['level'] = 0
+            jsnode['node_data']['level'] = "%d" % self.year_to_level[int(ni['year'])]
+        except Exception as e:
+            logging.error("Can not get year for %s: %s" % (paperId, e))
+            #logging.error(json.dumps(self.year_to_level, sort_keys=True, indent=2))
+            jsnode['node_data']['level'] = "1"
         return jsnode
     
     @dedup_paper
@@ -163,13 +169,19 @@ class ZotGraph:
         logging.info("Load Graph")
         G = nx.read_gpickle(self.graph_path)
         self.g = nx.DiGraph()
-        self.g.add_nodes_from(G.nodes(data=True))
-        for gnode in self.g.nodes(data=True):
-            paperId = gnode[0]
-            self.nodes[paperId] = self.__getNode(paperId=paperId)
+        #self.g.add_nodes_from(G.nodes(data=True))
+        all_nodes = set()
+        for gnode in G.nodes(data=True):
+            if gnode[0] not in self.filterIds and \
+                gnode[0] not in all_nodes and \
+                gnode[0] not in PAPER_DEDUPS.keys():
+                self.g.add_node(gnode[0], **gnode[1])
+                all_nodes.add(gnode[0])
+                paperId = gnode[0]
+                self.nodes[paperId] = self.__getNode(paperId=paperId)
             
         # clean edges (TODO: remove)
-        self.g.remove_edges_from(list(self.g.edges))
+        #self.g.remove_edges_from(list(self.g.edges))
         self.refreshAllLinks()
 
     def saveGraph(self):
@@ -183,11 +195,11 @@ class ZotGraph:
         edges = []
         added_nodes = set()
         for node in self.g.nodes(data=True):
-            logging.debug(node)
-            gnode = self.__getJsNode(paperId=node[0])
-            nodes.append(gnode)
-            #nodes.append(self.__getJsNode(paperId=node[0]))
-            added_nodes.add(node[0])
+            if node[0] not in added_nodes and node[0] not in PAPER_DEDUPS.keys():
+                logging.debug(node)
+                gnode = self.__getJsNode(paperId=node[0])
+                nodes.append(gnode)
+                added_nodes.add(node[0])
         for edge in self.g.edges(data=True):
             if edge[0] not in added_nodes or edge[1] not in added_nodes:
                 continue
@@ -243,12 +255,15 @@ class ZotGraph:
 
     @dedup_paper
     def __makeNewNode(self, paperId=None):
-        try:
-            logging.info("Searching Semantic Scholar for '%s'" % (paperId))
-            smitem = self.sm.paper(paperId)
-        except Exception as e:
-            logging.error("Failed to get paper '%s' from semanticscholar: %s" % (paperId, e))
-            return None
+
+        logging.info("Searching Semantic Scholar for '%s'" % (paperId))
+        smitem = self.sm.paper(paperId)
+        #try:
+        #    logging.info("Searching Semantic Scholar for '%s'" % (paperId))
+        #    smitem = self.sm.paper(paperId)
+        #except Exception as e:
+        #    logging.error("Failed to get paper '%s' from semanticscholar: %s" % (paperId, e))
+        #    return None
 
         title = smitem['title']            
         doi = smitem['doi']
@@ -257,8 +272,10 @@ class ZotGraph:
         zaitem = []
         try:
             zaitem = self.za.findItem(key=None, doi=doi, title=title)
+            logging.info("Got Zotero item (%d) for '%s' / '%s'" % (len(zaitem), doi, title))
         except Exception as e:
             logging.error("Error getting ZaItem for paperId %s: %s" % (paperId, e))
+
 
         if zaitem and len(zaitem) > 0:
             zaitem[0]['extref'], zaitem[0]['refinfo'] = self.za.extractRefs(zaitem[0]['data']['key'])
@@ -267,16 +284,8 @@ class ZotGraph:
                     if ref_title is None:
                         continue
                     logging.debug("Search for %s" % ref_title)
-                    #ref_sms = self.sm.searchTitle(ref_title)
-                    #if ref_sms == {}:
-                    #    logging.info("Failed to searc for title %s" % (ref_title))
-                    #    #logging.error(json.dumps(ref_sms, sort_keys=True, indent=2))
-                    #    continue
-                    ##logging.info(json.dumps(ref_sms, sort_keys=True, indent=2))
-                    #logging.info(ref_sms.keys())
                     best_r = 0
                     best_paperId = None
-                    #for ref_sm in ref_sms['data']:
                     for ref_sm in smitem["references"]:
                         r = fuzz.ratio(ref_sm['title'], ref_title)
                         if r > best_r:
@@ -339,7 +348,7 @@ class ZotGraph:
                 refstr_split = refstr.split(",")
             elif '-' in refstr:
                 refp_0, refp_1 = refstr.split("-")
-                refstr_split = map(lambda t: "%d" % t, range(refp_0, refp_1))
+                refstr_split = map(lambda t: "%d" % t, range(int(refp_0), int(refp_1)))
             else:
                 refstr_split = [refstr]
 
@@ -379,7 +388,11 @@ class ZotGraph:
     @dedup_paper
     def __getAnnotations(self, paperId=None):
         logging.debug("Get annotations references for paperId %s" % paperId)
-        annots = self.za.getAnnotations(self.nodes[paperId]['zaitem'][0]['key'])[0]
+        try:
+            annots = self.za.getAnnotations(self.nodes[paperId]['zaitem'][0]['key'])[0]
+        except Exception as e:
+            logging.warn("Could not get annotations for %s: %s" % (paperId, e))
+            return ZotGraph.NO_ANNOTS_STR
         #logging.info("Got annots for %s: %s" % (paperId, annots))
         ref_replace = self.__getAnnotRefs(paperId=paperId, annots=annots)
         for key, replacement in ref_replace.items():
@@ -395,11 +408,7 @@ class ZotGraph:
         except Exception as e:
             logging.error("No abstarct for %s: %s" % (paperId, e))
             abstract = "NO ABSTRACT\n"
-        try:
-            annots = self.__getAnnotations(paperId=paperId) + "\n"
-        except Exception as e:
-            logging.debug("No annots for %s: %s" % (paperId, e))
-            annots = "NO ANNOTS\n"
+        annots = self.__getAnnotations(paperId=paperId) + "\n"
         linkurl = "https://www.semanticscholar.org/paper/%s" % paperId
         ret = '<p>\n'
         ret += '<a href="%s">%s</a>\n' % (linkurl, linkurl)
@@ -418,6 +427,63 @@ class ZotGraph:
 
         return ret
 
+    def __updateYearSpanRemove(self, node):
+        try:
+            y = int(node['smitem']['year'])
+        except Exception as e:
+            logging.error("Failed to update year span on removing %s: %s" % (node['smitem']['paperId'], e))
+            return
+        if y not in self.year_to_paperid.keys():
+            logging.error("Can not remove year %d" % y)
+            return
+
+        if node['smitem']['paperId'] not in self.year_to_paperid[y]:
+            logging.error("PaperId %d not part of year %d" % (node['smitem']['paperId'], y))
+            return
+
+        self.year_to_paperid[y].remove(node['smitem']['paperId'])
+        if len(self.year_to_paperid[y]) == 0:
+            logging.info("Removing year %d" % y)
+            del self.year_to_paperid[y]
+            years_sorted = sorted(list(self.year_to_paperid.keys()))
+            if y == self.c_min_year:
+                logging.info("Adjusting year range min %d -> %d:%d" % (self.c_min_year, y, self.c_max_year))
+                self.c_min_year = years_sorted[0]
+                seqmap = plt.get_cmap('summer')
+                norm_year = matplotlib.colors.Normalize(vmin=self.c_min_year, vmax=self.c_max_year)
+                self.color["YEAR"] = plt.cm.ScalarMappable(cmap=seqmap, norm=norm_year)
+            if y == self.c_max_year:
+                logging.info("Adjusting year range max %d:%d -> %d" % (self.c_min_year, self.c_max_year, y))
+                self.c_min_year = years_sorted[0]
+                seqmap = plt.get_cmap('summer')
+                norm_year = matplotlib.colors.Normalize(vmin=self.c_min_year, vmax=self.c_max_year)
+                self.color["YEAR"] = plt.cm.ScalarMappable(cmap=seqmap, norm=norm_year)
+            self.year_to_level = {t: i+1 for i, t in enumerate(sorted(self.year_to_paperid.keys()))}
+
+    def __updateYearSpanAdd(self, node):
+        try:
+            y = int(node['smitem']['year'])
+        except Exception as e:
+            logging.error("Failed to update year span on adding %s: %s" % (node['smitem']['paperId'], e))
+            return
+        if y not in self.year_to_paperid.keys():
+            logging.info("Add year %d" % y)
+            self.year_to_paperid[y] = set()
+        self.year_to_paperid[y].add(node['smitem']['paperId'])
+        if y > self.c_max_year:
+            logging.info("Adjusting year range max %d:%d -> %d" % (self.c_min_year, self.c_max_year, y))
+            self.c_max_year = y
+            seqmap = plt.get_cmap('summer')
+            norm_year = matplotlib.colors.Normalize(vmin=self.c_min_year, vmax=self.c_max_year)
+            self.color["YEAR"] = plt.cm.ScalarMappable(cmap=seqmap, norm=norm_year)
+        if y < self.c_min_year:
+            logging.info("Adjusting year range min %d -> %d:%d" % (self.c_min_year, y, self.c_max_year))
+            self.c_min_year = y
+            seqmap = plt.get_cmap('summer')
+            norm_year = matplotlib.colors.Normalize(vmin=self.c_min_year, vmax=self.c_max_year)
+            self.color["YEAR"] = plt.cm.ScalarMappable(cmap=seqmap, norm=norm_year)
+        self.year_to_level = {t: i+1 for i, t in enumerate(sorted(self.year_to_paperid.keys()))}
+
     @dedup_paper
     def __getNode(self, paperId=None):
         node = self.__loadCacheNode(paperId=paperId)
@@ -427,26 +493,7 @@ class ZotGraph:
             logging.error("Failed to get node for %s" % paperId)
             raise("Failed to get node")
         node = self.__dedupRefs(node)
-        try:
-            y = int(node['smitem']['year'])
-            if y not in self.all_years:
-                self.all_years.add(y)
-                self.year_to_level = {t: (i+1) for i, t in enumerate(sorted(self.all_years))}
-                #logging.info(json.dumps(self.year_to_level, sort_keys=True, indent=2))
-            if y > self.c_max_year:
-                self.c_max_year = y
-                seqmap = plt.get_cmap('summer')
-                norm_year = matplotlib.colors.Normalize(vmin=self.c_min_year, vmax=self.c_max_year)
-                self.color["YEAR"] = plt.cm.ScalarMappable(cmap=seqmap, norm=norm_year)
-            if y < self.c_min_year:
-                self.c_min_year = y
-                seqmap = plt.get_cmap('summer')
-                norm_year = matplotlib.colors.Normalize(vmin=self.c_min_year, vmax=self.c_max_year)
-                self.color["YEAR"] = plt.cm.ScalarMappable(cmap=seqmap, norm=norm_year)
-        except Exception as e:
-            #logging.info(json.dumps(node, sort_keys=True, indent=2))
-            logging.error("XXXXXXXX %s" % e)
-            pass
+        self.__updateYearSpanAdd(node)
 
         try:
             nc = len(node['smitem']['citations'])
@@ -485,14 +532,9 @@ class ZotGraph:
             ref_id = ref["paperId"]
             if ref_id not in self.nodes:
                 continue
-            #logging.info("Check %s" % ref_id)
-            try:
-                annots = self.__getAnnotations(paperId=ref_id)
-            except Exception as e:
-                #logging.info(e)
-                continue
-
-            if not isinstance(annots, str):
+            annots = self.__getAnnotations(paperId=ref_id)
+            
+            if not isinstance(annots, str) or annots == ZotGraph.NO_ANNOTS_STR:
                 continue
             ret_paras = ""
             for para in annots.split("<p>"):
@@ -637,17 +679,19 @@ class ZotGraph:
         node = self.nodes[paperId]
         if node['smitem'] is None:
             return
-        #for ref in node['smitem']['references']:
-        ##    if self.g.has_node(ref['paperId']) and not self.g.has_edge(paperId, ref['paperId']):
-        #        #logging.info("Add reference edge from '%s' -> '%s' " % (self.__getPaperName(paperId), self.__getPaperName(ref['paperId'])))
-        #        redge = self.__addEdge(from_node=paperId, to_node=ref['paperId'], isInfluential=ref['isInfluential'])
-        #        new_edges.append(redge)
+        for ref in node['smitem']['references']:
+            if self.g.has_node(ref['paperId']) and not self.g.has_edge(paperId, ref['paperId']):
+                #logging.info("Add reference edge from '%s' -> '%s' " % (self.__getPaperName(paperId), self.__getPaperName(ref['paperId'])))
+                redge = self.__addEdge(from_node=paperId, to_node=ref['paperId'], isInfluential=ref['isInfluential'])
+                if redge is not None:
+                    new_edges.append(redge)
                 
         for ref in node['smitem']['citations']:
             if self.g.has_node(ref['paperId']) and not self.g.has_edge(ref['paperId'], paperId):
                 #logging.info("Add citation edge from '%s' <- '%s' " % (self.__getPaperName(paperId), self.__getPaperName(ref['paperId'])))
                 redge = self.__addEdge(from_node=ref['paperId'], to_node=paperId, isInfluential=ref['isInfluential'])
-                new_edges.append(redge)
+                if redge is not None:
+                    new_edges.append(redge)
         #self.lock.release()
         return new_edges
     
@@ -781,10 +825,12 @@ class ZotGraph:
         with open(self.filterfn, "w") as fd:
             for fid in self.filterIds:
                 fd.write(fid + "\n")
-        try:
+
+        self.__updateYearSpanRemove(self.nodes[paperId])
+        if self.g.has_node(paperId):
             self.g.remove_node(paperId)
-        except:
-            pass
+        if paperId in self.nodes.keys():
+            del self.nodes[paperId]
 
     @dedup_paper
     def removePaperId(self, paperId=None):
@@ -793,6 +839,12 @@ class ZotGraph:
         self.lock.release()
 
     def __addEdge(self, from_node=None, to_node=None, isInfluential=False, edgeColor=COLOR_INZOT):
+        if from_node == to_node:
+            logging.error("Edge %s - %s self reference" % (from_node, to_node))
+            return None
+        if self.g.has_edge(from_node, to_node) or self.g.has_edge(to_node, from_node):
+            logging.error("Edge %s - %s already exists" % (from_node, to_node))
+            return None
         debug_edge = False
         if (from_node == "a299bd8d1d1b7e44273f1d517d6032f93ec7fcbf" or to_node == "a299bd8d1d1b7e44273f1d517d6032f93ec7fcbf") and \
             (from_node == "439280d09bdc02c13fe2f2dc5eff1e145a16cc45" or to_node == "439280d09bdc02c13fe2f2dc5eff1e145a16cc45"):
@@ -843,9 +895,13 @@ class ZotGraph:
             logging.debug("PaperId '%s' is already present" % paperId)
             if pnode:
                 if isRef:
-                    new_edges.append(self.__addEdge(from_node=pnode, to_node=paperId, isInfluential=isInfluential, edgeColor=edgeColor))
+                    redge = self.__addEdge(from_node=pnode, to_node=paperId, isInfluential=isInfluential, edgeColor=edgeColor)
+                    if redge is not None:
+                        new_edges.append(redge)
                 else:
-                    new_edges.append(self.__addEdge(from_node=paperId, to_node=pnode, isInfluential=isInfluential, edgeColor=edgeColor))
+                    redge = self.__addEdge(from_node=paperId, to_node=pnode, isInfluential=isInfluential, edgeColor=edgeColor)
+                    if redge is not None:
+                        new_edges.append(redge)
             return new_nodes, new_edges, new_paperinfo
 
         node = self.__getNode(paperId=paperId)
@@ -858,7 +914,7 @@ class ZotGraph:
     
         label = self.__getPaperName(paperId=paperId)
         color = self.__getNodeColor(paperId=paperId)
-        logging.debug("Add node '%s' / '%s'" % (paperId, label))
+        logging.info("Add node '%s' / '%s'" % (paperId, label))
         self.g.add_node(paperId, label=label, shape='box', color=color)
         new_nodes.append(self.__getJsNode(paperId=paperId))
         new_paperinfo.append({
@@ -867,9 +923,13 @@ class ZotGraph:
         })
         if pnode:
             if isRef:
-                new_edges.append(self.__addEdge(from_node=pnode, to_node=paperId, isInfluential=isInfluential, edgeColor=edgeColor))
+                redge = self.__addEdge(from_node=pnode, to_node=paperId, isInfluential=isInfluential, edgeColor=edgeColor)
+                if redge is not None:
+                    new_edges.append(redge)
             else:
-                new_edges.append(self.__addEdge(from_node=paperId, to_node=pnode, isInfluential=isInfluential, edgeColor=edgeColor))
+                redge = self.__addEdge(from_node=paperId, to_node=pnode, isInfluential=isInfluential, edgeColor=edgeColor)
+                if redge is not None:
+                    new_edges.append(redge)
 
         refreshed_edges = self.__refreshLinks(paperId=paperId)
         new_edges.extend(refreshed_edges)
