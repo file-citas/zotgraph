@@ -57,7 +57,7 @@ The default color scheme is based on your zotero collections, other supported co
 
 ![author color](/images/color.png)
 
-ZotGraph will parse your Zotero Annotations and add them to the display.
+ZotGraph will parse your Zotero Annotations and add them to the display. You can click the link at the end of each annotation paragraph to open the pdf and jump to the respective highlight.
 
 ![annotations](/images/annotations.png)
 
