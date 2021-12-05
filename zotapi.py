@@ -1,8 +1,9 @@
 from pyzotero import zotero
 import pandas as pd
+import json
 import logging
 
-from refextract import RefExtract
+#from refextract import RefExtract
 
 
 class ZotApi:
@@ -11,6 +12,8 @@ class ZotApi:
         self.df = pd.read_csv(libcsv)
         self.libcsv = libcsv
         self.colkeys = {}
+        self.colkeys2 = {}
+        self.keytocol = {}
         logging.info("Initialized Zotero API csv: %s, libid: %s, libtype: %s, akey: %s" % (libcsv, library_id, library_type, api_key))
 
     def reloadCsv(self):
@@ -71,11 +74,10 @@ class ZotApi:
         return ret
 
     def getAnnotations(self, key):
-        logging.info("get annotations for key %s" % key)
+        logging.debug("get annotations for key %s" % key)
         annots = self.df[self.df['Key'] == key]['Notes'].values
-        if len(annots) < 1 or not isinstance(annots[0], str):
-            logging.warn("No annotations for %s" % key)
-            raise Exception("No annots for key %s" % key)
+        #if len(annots) < 1 or not isinstance(annots[0], str):
+        #    logging.warn("No annotations for %s" % key)
         #logging.info("Got annots for %s: %s" % (key, annots))
         #ref_replace = self.__getAnnotRefs(paperId, annots)
         #for key, replacement in ref_replace.items():
@@ -83,16 +85,16 @@ class ZotApi:
         #    annots = annots.replace(key, replacement)
         return annots
 
-    def extractRefs(self, key):
-        try:
-            pdfpath = self.getPdfPath(key)
-        except Exception as e:
-            logging.warn("Could not get pdf path for key '%s': %s" % (key, e))
-            return  {}, {}
-        if not pdfpath:
-            logging.warn("No pdf for %s" % key)
-            return {}, {}
-        return RefExtract.extractRefs(pdfpath)
+    #def extractRefs(self, key):
+    #    try:
+    #        pdfpath = self.getPdfPath(key)
+    #    except Exception as e:
+    #        logging.warn("Could not get pdf path for key '%s': %s" % (key, e))
+    #        return  {}, {}
+    #    if not pdfpath:
+    #        logging.warn("No pdf for %s" % key)
+    #        return {}, {}
+    #    return RefExtract.extractRefs(pdfpath)
 
         
     def getPdfPath(self, key):
@@ -126,3 +128,51 @@ class ZotApi:
                 self.colkeys[ckey] = self.__getParentCollectionNames(ckey)
             cols[ckey] = self.colkeys[ckey]
         return cols
+    
+    def getCollectionNameByKey(self, key):
+        logging.info("Get collection for key %s" % key)
+        if key in self.keytocol.keys():
+            return self.keytocol[key]
+        item = self.getItemByKey(key)
+        #logging.info(json.dumps(item, sort_keys=True, indent=2))
+        cols = self.getCollections(item[0])
+        cname = ":".join(cols)
+        self.keytocol[key] = cname
+        return cname
+
+    def getCollectionItemsByName(self, colname):
+        skeys = []
+        collections = self.zot.collections()
+        this_col = None
+        for col in collections:
+            if col['data']['name'] == colname:
+                if this_col is not None:
+                    logging.error("duplicate collectio name %s" % colname)
+                    return []
+                this_col = col
+        if this_col is not None:
+            #logging.info(json.dumps(this_col, sort_keys=True, indent=2))
+            citems = self.zot.collection_items(this_col['data']['key'])
+            for item in citems:
+                try:
+                    link = self.df[self.df['Key'] == item['key']]['Link Attachments'].values
+                    title = self.df[self.df['Key'] == item['key']]['Title'].values
+                    if len(link) > 0 and "semantic" in link[0]:
+                        skey = link[0].split("/")[-1]
+                        skeys.append(skey)
+                    elif len(title) > 0:
+                        logging.warn("No semantic link for %s" % title[0])
+                    #logging.info("CItem %s, links: %s" % (str(title), str(link)))
+                except:
+                    pass
+            return skeys
+    
+    def getCollectionName(self,  ckey):
+        #logging.info("Get name for col %s" % ckey)
+        if ckey in self.colkeys2.keys():
+            return self.colkeys2[ckey]
+        col = self.zot.collection(ckey)
+        #logging.info(json.dumps(col, sort_keys=True, indent=2))
+        cname = col['data']['name']
+        self.colkeys2[ckey] = cname
+        return cname

@@ -20,13 +20,23 @@ from semanticscholar import SemanticScholar
 from zotapi import ZotApi
 from datetime import timedelta
 from ratelimit import limits, sleep_and_retry
+from refextract import RefExtract
 
 PAPER_DEDUPS= {
     "57cee3a90bb0caa822fc188b083a01aa1e17cca9": "d896ef2a393eb8022446a7d8951432ac8f424bbd",
     "fd0427a143ee4d17fd07dee0faff24c853081d99": "a64cbe93930b51276af3c5235dad2b8d6d7aef67",
     "88ad913424405ac32657a8557f74003b22e9be3c": "aa5be948f04bb23fa6473157312413df3cbbc44e",
+    "c9cfafe6655cf84ee5c3f1924b2e03839634ea60": "81afe3f238b7ec01e30346bb476e3d29af9683aa",
+    "2148c6ae13180dbc4e7aec3a56f41abd66c1784a": "f97154903f5b00b07f31623fa2e7ba8d81982762",
+    "b0ff249b9b507fb973f007656598a19fc6e9b287": "65e946633ddf39084ec9c37e00e05b89ed424d39",
 }
 PAPER_DEDUPS_INV = {v: k for k, v in PAPER_DEDUPS.items()}
+# Available values : acs, ama, apa, chicago, ensemble, experimental, harvard, ieee, mhra, mla, nature, vancouver
+
+
+CITATION_STYLES = {
+    "0fc4415291af1e74f23dfcf3ba3ab192c6649a79": 'apa'
+}
 
 
 def dedup_paper(func):
@@ -39,9 +49,12 @@ def dedup_paper(func):
 
 
 class ZotGraph:
+    MIN_TITLE_LEN = 16
+    FUZZ_TITLE_MINR = 65
     NO_ANNOTS_STR = "NO ANNOTATIONS"
     #P_REFS = re.compile("\[(?:\d+,*-*\s*)+\d+\]")
     P_REFS = re.compile("(\[((?:,*-*\s*)?[\w\d\+]+)+])")
+    P_REFS_TEST = re.compile("(\[(.*?)\])")
     P_REFS2 = re.compile("(\d+(<a href=\".*?\">\w<\/a>){1,3})")
     COLOR_INZOT='#383745'
     #COLOR_REF='#162347'
@@ -61,6 +74,7 @@ class ZotGraph:
         self.max_cit = cfilter['cit']
         self.za = ZotApi(libcsv, library_id, library_type, api_key)
         self.sm = SemanticScholar()
+        self.re = RefExtract(self.sm)
         self.nodes = {}
         self.ncachefn = ncache
         self.htmldir = htmldir
@@ -106,6 +120,7 @@ class ZotGraph:
         year = 0
         title = "?"
         ncit = -1
+        collection = "N/A"
         try:
             author = smitem['authors'][0]['name']
         except:
@@ -122,10 +137,20 @@ class ZotGraph:
             ncit = len(smitem['citations'])
         except:
             pass
+        if 'zaitem' in self.nodes[paperId].keys() and len(self.nodes[paperId]['zaitem']) > 0:
+            zaitem = self.nodes[paperId]['zaitem'][0]
+            cnames = []
+            for col in zaitem['data']['collections']:
+                cnames.append(self.za.getCollectionName(col))
+            collection = ":".join(cnames)
+            #collection = self.za.getCollectionName(zaitem['data']['collections'])
+            #collection = self.za.getCollectionNameByKey(zaitem['key'])
+
         return {
             "author": author, 
             "year": year, 
             "ncit": ncit, 
+            "collection": collection,
             "title": title,
         }
 
@@ -148,6 +173,7 @@ class ZotGraph:
                 "author": ni["author"],
                 "year": ni["year"],   
                 "ncit": ni["ncit"],
+                "collection": ni["collection"],
                 "title": ni["title"],
                 "node_data": {         
                     "color": self.__getNodeColor(paperId=paperId),
@@ -253,6 +279,89 @@ class ZotGraph:
             node['c_processed'] = False
             return node
 
+    def __extractRefs(self, key, paperId=None):
+        try:
+            pdfpath = self.za.getPdfPath(key)
+        except Exception as e:
+            logging.warn("Could not get pdf path for key '%s': %s" % (key, e))
+            return  {}, {}
+        if not pdfpath:
+            logging.warn("No pdf for %s" % key)
+            return {}, {}
+        return self.re.extractRefs(pdfpath, paperId)
+
+    def __findTitleSemanticScholar(self, title, all_refIds):
+        logging.info("Searching Semantic Scholar '%s'" % title)
+        sm_data = self.sm.searchTitle(title)
+        #logging.info(json.dumps(sm_data, sort_keys=True, indent=2))
+        for sm_entry in sm_data["data"]:
+            if sm_entry["paperId"] not in all_refIds:
+                continue
+            r = fuzz.partial_ratio(title.lower(), sm_entry["title"].lower())
+            logging.info("SM title r %d '%s'" % (r, sm_entry["title"]))
+            if r > 80:
+                logging.info("Best SM title '%s'" % sm_entry["title"])
+                return sm_entry["title"]
+        return "?"
+
+
+    def __cluster_rs(self, all_rs, c_diff=32, verbose=False):
+        r_diffs = [0]
+        s_rs = sorted(list(all_rs))
+
+        if verbose:
+            logging.info(s_rs)
+        for i in range(0, len(s_rs)-1):
+            r_diffs.append(-1*(s_rs[i]-s_rs[i+1]))
+        
+        if verbose:
+            logging.info(r_diffs)
+
+        clusters = {}
+        cluster = []
+        for i in range(0, len(s_rs)):
+            if r_diffs[i] >= c_diff:
+                if verbose:
+                    logging.info("ADD Cluster %d: %s" % (s_rs[i], str(cluster)))
+                clusters[s_rs[i-1]] = cluster
+                cluster = []
+            cluster.append(s_rs[i])
+        if len(cluster) > 0:
+            clusters[s_rs[-1]] = cluster
+        if verbose:
+            logging.info(json.dumps(clusters, sort_keys=True, indent=2))
+        return clusters
+        
+    @dedup_paper
+    def __matchTitle(self, ref_title, smitem):
+        if len(ref_title) < ZotGraph.MIN_TITLE_LEN:
+            return 0, "", ""
+        logging.debug("Search for %s" % ref_title)
+        best_r = 0
+        best_paperId = None
+        best_title = ""
+        candidates = {}
+        all_rs = set()
+        for ref_sm in smitem["references"]:
+            if len(ref_sm['title']) < ZotGraph.MIN_TITLE_LEN:
+                continue
+            r = fuzz.partial_ratio(ref_sm['title'].lower(), ref_title.lower())
+            all_rs.add(r)
+            if r not in candidates.keys():
+                candidates[r] = []
+            if r > best_r:
+                best_r = r
+                best_paperId = ref_sm['paperId']
+                best_title = ref_sm['title']
+            candidates[r].append({
+                "t": ref_sm['title'],
+                "id": ref_sm['paperId'],
+            })
+            #if r == 100:
+            #    break
+        clusters = self.__cluster_rs(all_rs)
+        return best_r, best_paperId, best_title, candidates
+        
     @dedup_paper
     def __makeNewNode(self, paperId=None):
 
@@ -277,23 +386,42 @@ class ZotGraph:
             logging.error("Error getting ZaItem for paperId %s: %s" % (paperId, e))
 
 
+        all_refIds = set()
+        for ref in smitem["references"]:
+            all_refIds.add(ref['paperId'])
         if zaitem and len(zaitem) > 0:
-            zaitem[0]['extref'], zaitem[0]['refinfo'] = self.za.extractRefs(zaitem[0]['data']['key'])
+            zaitem[0]['extref'], zaitem[0]['refinfo'] = self.__extractRefs(zaitem[0]['data']['key'], paperId=paperId)
+            new_titles = {}
             if zaitem[0]['extref'] and 'titles' in zaitem[0]['extref'].keys():
                 for idx, ref_title in zaitem[0]['extref']['titles'].items():
+                    new_titles[idx] = ref_title
                     if ref_title is None:
                         continue
+                    if ref_title == "?":
+                        continue
+                    if len(ref_title) < ZotGraph.MIN_TITLE_LEN:
+                        continue
                     logging.debug("Search for %s" % ref_title)
-                    best_r = 0
-                    best_paperId = None
-                    for ref_sm in smitem["references"]:
-                        r = fuzz.ratio(ref_sm['title'], ref_title)
-                        if r > best_r:
-                            best_r = r
-                            best_paperId = ref_sm['paperId']
-                        if r == 100:
-                            break
-                    zaitem[0]['extref']['paperIds'][idx] = best_paperId
+                    best_r, best_paperId, best_title, candidates = self.__matchTitle(ref_title, smitem)
+                    for cand in candidates[best_r]:
+                        logging.info("Best candidates score %d: '%s' / %s" % (best_r, cand['t'], cand['id']))
+                    if best_r > ZotGraph.FUZZ_TITLE_MINR:
+                        logging.info("Fuzzy matched title score %d '%s' / '%s'" % (best_r, ref_title, best_title))
+                        zaitem[0]['extref']['paperIds'][idx] = best_paperId
+                        new_titles[idx] = best_title
+                    else:
+                        #if len(candidates[best_r]) == 1:
+                        #    logging.info("Fuzzy matched best candidate group: score %d '%s' / '%s'" % (best_r, ref_title, best_title))
+                        #else:
+                        logging.info("Fuzzy matched title failed (trying sm): score %d '%s' / '%s'" % (best_r, ref_title, best_title))
+                        #sm_title = self.__findTitleSemanticScholar(ref_title, all_refIds)
+                        #best_r, best_paperId, best_title, candidates = self.__matchTitle(sm_title, smitem)
+                        #if best_r > ZotGraph.FUZZ_TITLE_MINR:
+                        #    logging.info("Fuzzy matched SM title score %d '%s' / '%s'" % (best_r, ref_title, best_title))
+                        #    zaitem[0]['extref']['paperIds'][idx] = best_paperId
+                        #    new_titles[idx] = best_title
+                        #else:
+                        #    logging.info("Fuzzy matched SM title failed: score %d '%s' / '%s'" % (best_r, sm_title, best_title))
 
         node = {
             'doi': doi,
@@ -317,6 +445,9 @@ class ZotGraph:
 
     @dedup_paper
     def __getAnnotRefs(self, paperId=None, annots=None):
+        verbose = False
+        #if paperId == "0fc4415291af1e74f23dfcf3ba3ab192c6649a79":
+        #    verbose = True
         refs_replace = {}
         logging.debug("Get annotated references for paperId %s" % paperId)
         #annots = self.za.getAnnotations(self.nodes[paperId]['zaitem'][0]['key'])[0]
@@ -333,14 +464,16 @@ class ZotGraph:
             logging.debug(json.dumps(self.nodes[paperId]['zaitem'][0]))
             return {}
         #logging.debug(annots)
-        refs = ZotGraph.P_REFS.findall(annots)
-        logging.debug("REFS: %s" % refs)
+        refs = ZotGraph.P_REFS_TEST.findall(annots)
+        if verbose:
+            logging.info("REFS: %s" % refs)
         for ref_group in refs:
             ref = ref_group[0]
             ref_replace = "%s" % ref
             ref = ref.replace("[", "")
             ref = ref.replace("]", "")
-            logging.debug("Scan Ref: %s" % ref)
+            if verbose:
+                logging.info("Scan Ref: %s" % ref)
             replacements = []
             refstr = ref #ref[1:-1]
             refstr_split = []
@@ -355,23 +488,30 @@ class ZotGraph:
             for refp in refstr_split:
                 l_ref = refp
                 refp = refp.replace(", ", "")
-                refp = refp.replace(" ", "")
-                logging.debug("Scan Ref part: '%s'" % refp)
+                #refp = refp.replace(" ", "")
+                refp = refp.removeprefix(" ")
+                refp = refp.removesuffix(" ")
+                if verbose:
+                    logging.info("Scan Ref part: '%s'" % refp)
+                    logging.info(plinks.keys())
                 new_ref = refp
                 ref_idx = refp
                 if plinks is not None and ref_idx in plinks.keys():
                     ref_url = plinks[ref_idx]
                     if ref_url is not None:
-                        logging.debug("Got ref link: %s" % ref_url)
+                        if verbose:
+                            logging.info("Got ref link: %s" % ref_url)
                         l_ref = "<a href=\"%s\" id=\"paperref\">u</a>" % (ref_url)
                         new_ref += l_ref
                 if prefs is not None and ref_idx in prefs.keys():
                     ref_title = prefs[ref_idx]
-                    logging.debug("Got ref title: %s" % ref_title)
+                    if verbose:
+                        logging.info("Got ref title: %s" % ref_title)
                 if refids is not None and ref_idx in refids.keys():
                     ref_paperId = refids[ref_idx]
                     if ref_paperId is not None:
-                        logging.debug("Got ref paperId: %s" % ref_paperId)
+                        if verbose:
+                            logging.info("Got ref paperId: %s" % ref_paperId)
                         ref_linkurl = "https://www.semanticscholar.org/paper/%s" % ref_paperId
                         l_scholar = "<a href=\"%s\" id=\"paperref\">s</a>" % (ref_linkurl)
                         new_ref += l_scholar
@@ -387,17 +527,31 @@ class ZotGraph:
 
     @dedup_paper
     def __getAnnotations(self, paperId=None):
+        verbose = False
+        #if paperId == "0fc4415291af1e74f23dfcf3ba3ab192c6649a79":
+        #    verbose = True
         logging.debug("Get annotations references for paperId %s" % paperId)
+        annots = ZotGraph.NO_ANNOTS_STR
+        zaitem = None
         try:
-            annots = self.za.getAnnotations(self.nodes[paperId]['zaitem'][0]['key'])[0]
-        except Exception as e:
-            logging.warn("Could not get annotations for %s: %s" % (paperId, e))
-            return ZotGraph.NO_ANNOTS_STR
-        #logging.info("Got annots for %s: %s" % (paperId, annots))
-        ref_replace = self.__getAnnotRefs(paperId=paperId, annots=annots)
-        for key, replacement in ref_replace.items():
-            logging.debug("Replace %s ref %s -> %s" % (paperId, key, replacement))
-            annots = annots.replace(key, replacement)
+            zaitem = self.nodes[paperId]['zaitem']
+            zaitem = zaitem[0]
+        except (KeyError, IndexError):
+            logging.debug("No zotero item for paperId %s" % paperId)
+            return annots
+        
+        if zaitem is not None:
+            annots_cand = self.za.getAnnotations(zaitem['key'])[0]
+            if isinstance(annots_cand, str):
+                annots = annots_cand
+                #logging.info("Got annots for %s: %s" % (paperId, annots))
+                ref_replace = self.__getAnnotRefs(paperId=paperId, annots=annots)
+                for key, replacement in ref_replace.items():
+                    if verbose:
+                        logging.debug("Replace %s ref %s -> %s" % (paperId, key, replacement))
+                    annots = annots.replace(key, replacement)
+        
+        logging.debug("Got annotations references for paperId %s" % paperId)
         return annots 
 
     @dedup_paper
@@ -425,7 +579,27 @@ class ZotGraph:
         ret += '<h2>Mentions</h2>\n'
         ret += self.__whatDoOthersSay(paperId=paperId)
 
+        logging.debug("Got paper information for %s" % paperId)
         return ret
+
+    def __updateYearSpan(self):
+        years_sorted = sorted(list(self.year_to_paperid.keys()))
+        new_min = years_sorted[0]
+        new_max = years_sorted[-1]
+        changed = False
+        if new_min < self.c_min_year:
+            logging.info("Adjusting year range min %d -> %d:%d" % (self.c_min_year, new_min, self.c_max_year))
+            self.c_min_year = new_min
+            changed = True
+        if new_max > self.c_max_year:
+            logging.info("Adjusting year range max %d: %d -> %d" % (self.c_min_year, self.c_max_year, new_max))
+            self.c_max_year = new_max
+            changed = True
+        if changed:
+            seqmap = plt.get_cmap('summer')
+            norm_year = matplotlib.colors.Normalize(vmin=self.c_min_year, vmax=self.c_max_year)
+            self.color["YEAR"] = plt.cm.ScalarMappable(cmap=seqmap, norm=norm_year)
+        self.year_to_level = {t: i+1 for i, t in enumerate(sorted(self.year_to_paperid.keys()))}
 
     def __updateYearSpanRemove(self, node):
         try:
@@ -445,20 +619,7 @@ class ZotGraph:
         if len(self.year_to_paperid[y]) == 0:
             logging.info("Removing year %d" % y)
             del self.year_to_paperid[y]
-            years_sorted = sorted(list(self.year_to_paperid.keys()))
-            if y == self.c_min_year:
-                logging.info("Adjusting year range min %d -> %d:%d" % (self.c_min_year, y, self.c_max_year))
-                self.c_min_year = years_sorted[0]
-                seqmap = plt.get_cmap('summer')
-                norm_year = matplotlib.colors.Normalize(vmin=self.c_min_year, vmax=self.c_max_year)
-                self.color["YEAR"] = plt.cm.ScalarMappable(cmap=seqmap, norm=norm_year)
-            if y == self.c_max_year:
-                logging.info("Adjusting year range max %d:%d -> %d" % (self.c_min_year, self.c_max_year, y))
-                self.c_min_year = years_sorted[0]
-                seqmap = plt.get_cmap('summer')
-                norm_year = matplotlib.colors.Normalize(vmin=self.c_min_year, vmax=self.c_max_year)
-                self.color["YEAR"] = plt.cm.ScalarMappable(cmap=seqmap, norm=norm_year)
-            self.year_to_level = {t: i+1 for i, t in enumerate(sorted(self.year_to_paperid.keys()))}
+        self.__updateYearSpan()
 
     def __updateYearSpanAdd(self, node):
         try:
@@ -470,19 +631,7 @@ class ZotGraph:
             logging.info("Add year %d" % y)
             self.year_to_paperid[y] = set()
         self.year_to_paperid[y].add(node['smitem']['paperId'])
-        if y > self.c_max_year:
-            logging.info("Adjusting year range max %d:%d -> %d" % (self.c_min_year, self.c_max_year, y))
-            self.c_max_year = y
-            seqmap = plt.get_cmap('summer')
-            norm_year = matplotlib.colors.Normalize(vmin=self.c_min_year, vmax=self.c_max_year)
-            self.color["YEAR"] = plt.cm.ScalarMappable(cmap=seqmap, norm=norm_year)
-        if y < self.c_min_year:
-            logging.info("Adjusting year range min %d -> %d:%d" % (self.c_min_year, y, self.c_max_year))
-            self.c_min_year = y
-            seqmap = plt.get_cmap('summer')
-            norm_year = matplotlib.colors.Normalize(vmin=self.c_min_year, vmax=self.c_max_year)
-            self.color["YEAR"] = plt.cm.ScalarMappable(cmap=seqmap, norm=norm_year)
-        self.year_to_level = {t: i+1 for i, t in enumerate(sorted(self.year_to_paperid.keys()))}
+        self.__updateYearSpan()
 
     @dedup_paper
     def __getNode(self, paperId=None):
@@ -503,7 +652,7 @@ class ZotGraph:
                 norm_ncit = matplotlib.colors.Normalize(vmin=self.c_min_ncit, vmax=self.c_max_ncit)
                 self.color["NCIT"] = plt.cm.ScalarMappable(cmap=seqmap, norm=norm_ncit)
             if nc < self.c_min_nc:
-                self.c_min_year = nc
+                self.c_min_nc = nc
                 seqmap = plt.get_cmap('summer')
                 norm_ncit = matplotlib.colors.Normalize(vmin=self.c_min_ncit, vmax=self.c_max_ncit)
                 self.color["NCIT"] = plt.cm.ScalarMappable(cmap=seqmap, norm=norm_ncit)
@@ -528,10 +677,14 @@ class ZotGraph:
         
         logging.debug("Get Mentions about %s" % paperId)
         ret = ""
+        handled = set()
         for ref in self.nodes[paperId]['smitem']["citations"]:
             ref_id = ref["paperId"]
             if ref_id not in self.nodes:
                 continue
+            if ref_id in handled:
+                continue
+            handled.add(ref_id)
             annots = self.__getAnnotations(paperId=ref_id)
             
             if not isinstance(annots, str) or annots == ZotGraph.NO_ANNOTS_STR:
@@ -666,8 +819,19 @@ class ZotGraph:
             logging.debug("Merge %d citations and %d references for duplicate node %s / %s" % \
                 (len(dedup_node['smitem']['citations']), len(dedup_node['smitem']['references']), 
                 node['smitem']['paperId'], dedup_node['smitem']['paperId']))
-            node['smitem']['citations'].extend(dedup_node['smitem']['citations'])
-            node['smitem']['references'].extend(dedup_node['smitem']['references'])
+            cit_handled = set()
+            for ref in dedup_node['smitem']['citations']:
+                if ref['paperId'] in cit_handled:
+                    continue
+                cit_handled.add(ref['paperId'])
+                node['smitem']['citations'].append(ref)
+            ref_handled = set()
+            for ref in dedup_node['smitem']['references']:
+                if ref['paperId'] in ref_handled:
+                    continue
+                ref_handled.add(ref['paperId'])
+                node['smitem']['citations'].append(ref)
+            #node['smitem']['references'].extend(dedup_node['smitem']['references'])
         return node
 
     @dedup_paper
@@ -779,6 +943,22 @@ class ZotGraph:
         ret = self.__addNode('', '', paperId=paperId)
         self.lock.release()
         return ret
+    
+    def addCollectionId(self, colname):
+        logging.debug("Add collection '%s'" % (colname))
+        new_nodes = []
+        new_edges = []
+        new_paperInfo = []
+        self.lock.acquire()
+        skeys = self.za.getCollectionItemsByName(colname)
+        logging.info("Got keys for collection %s: %s" % (colname, ", ".join(skeys)))
+        for skey in skeys:
+            nn, ne, np = self.__addNode("", "", paperId=skey)
+            new_nodes.extend(nn)
+            new_edges.extend(ne)
+            new_paperInfo.extend(np)
+        self.lock.release()
+        return new_nodes, new_edges, new_paperInfo
 
     @dedup_paper
     def rescan_all(self):
@@ -843,7 +1023,7 @@ class ZotGraph:
             logging.error("Edge %s - %s self reference" % (from_node, to_node))
             return None
         if self.g.has_edge(from_node, to_node) or self.g.has_edge(to_node, from_node):
-            logging.error("Edge %s - %s already exists" % (from_node, to_node))
+            logging.debug("Edge %s - %s already exists" % (from_node, to_node))
             return None
         debug_edge = False
         if (from_node == "a299bd8d1d1b7e44273f1d517d6032f93ec7fcbf" or to_node == "a299bd8d1d1b7e44273f1d517d6032f93ec7fcbf") and \

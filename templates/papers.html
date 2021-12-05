@@ -8,9 +8,12 @@
     <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='easyui/demo/demo.css')}}">
     <script type="text/javascript" src="{{ url_for('static', filename='easyui/jquery.min.js')}}"></script>
     <script type="text/javascript" src="{{ url_for('static', filename='easyui/jquery.easyui.min.js')}}"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/vis/4.16.1/vis.css" type="text/css" />
-    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/vis/4.16.1/vis-network.min.js"> </script>
-    <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='site.css')}}" />
+
+    <script
+      type="text/javascript"
+      src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"
+    ></script><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/vis/4.16.1/vis.css" type="text/css" />
+    
     <title>{{pname}}</title>
 </head>
 
@@ -59,9 +62,10 @@
                 "repulsion": {
                     "centralGravity": 0.002,
                     "damping": 0.1,
-                    "nodeDistance": 100,
-                    "springConstant": 0.00005,
-                    "springLength": 300
+                    "nodeDistance": 500,
+                    "springConstant": 0.05,
+                    "springLength": 500,
+                    "avoidOverlap": 0.9,
                 },
                 "solver": "repulsion",
                 "stabilization": {
@@ -78,9 +82,9 @@
                     "enabled": false,
                     "direction": "UD",
                     "sortMethod": "directed",
-                    "nodeSpacing": 100,
-                    "treeSpacing": 100,
-                    "levelSeparation": 100,
+                    "nodeSpacing": 20,
+                    "treeSpacing": 20,
+                    "levelSeparation": 20,
                     "edgeMinimization": false,
                 },
             },
@@ -117,12 +121,13 @@
             },
             "physics": {
                 "enabled": true,
-                "repulsion": {
-                    "centralGravity": 0.002,
+                "hierarchicalRepulsion": {
+                    "centralGravity": 0.02,
                     "damping": 0.1,
-                    "nodeDistance": 100,
-                    "springConstant": 0.00005,
-                    "springLength": 300
+                    "nodeDistance": 500,
+                    "springConstant": 0.01,
+                    "springLength": 500,
+                    "avoidOverlap": 0.9,
                 },
                 "solver": "repulsion",
                 "stabilization": {
@@ -131,7 +136,9 @@
                     "iterations": 500,
                     "onlyDynamicEdges": false,
                     "updateInterval": 30
-                }
+                },
+                "minVelocity": 0.1,
+                "maxVelocity": 10,
             },
             "layout": {
                 "improvedLayout": true,
@@ -142,7 +149,10 @@
                     "nodeSpacing": 100,
                     "treeSpacing": 100,
                     "levelSeparation": 100,
-                    "edgeMinimization": false,
+                    "edgeMinimization": true,
+                    "blockShifting": true,
+                    "parentCentralization": true,
+                    "shakeTowards": "roots",
                 },
             },
         };
@@ -178,7 +188,7 @@
             for (let i = 0; i < n_rows; i++) {
                 $('#papertable').datagrid('refreshRow', i);
             }
-            $('#papertable').datagrid('reload');
+            //$('#papertable').datagrid('reload');
         }
 
         $(function () {
@@ -197,19 +207,19 @@
                     if (rowNodeId == selectedNode) {
                         return 'background-color:white';
                     }
-                    //console.log("Set row color for " + rowNodeId);
-                    //gNodes = nodes.get({'id': rowNodeId})
-                    gNodes = [network.body.data.nodes._data[rowNodeId]];
-                    //console.log(gNodes.length)
-                    for (let i = 0; i < gNodes.length; i++) {
-                        gNode = gNodes[i];
-                        if (gNode != undefined && gNode['id'] == rowNodeId) {
+                    console.log("Set row color for " + rowNodeId);
+                    gNode = network_data.nodes.get(rowNodeId);
+                    //gNodes = [network.body.data.nodes._data[rowNodeId]];
+                    console.log(gNode);
+                    //for (let i = 0; i < gNodes.length; i++) {
+                    //    gNode = gNodes[i];
+                    //    if (gNode != undefined && gNode['id'] == rowNodeId) {
                             //console.log(gNode)
                             new_color = gNode['color'];
                             //console.log("Set row color for " + rowNodeId + " -> " + new_color);
                             return 'background-color:' + new_color;
-                        }
-                    }
+                    //    }
+                    //}
                     return 'background-color:white';
                 }
             });
@@ -244,6 +254,7 @@
                         year: new_node['year'],
                         nc: new_node['ncit'],
                         author: new_node['author'],
+                        collection: new_node['collection'],
                         title: new_node['title'],
                         nodeId: new_node['node_data']['id']
                     });
@@ -284,11 +295,12 @@
                     }
                 }
                 if (needs_row) {
-                    console.log("Add row " + new_row['title'] + ", " + new_row['year'] + ", " + new_row['ncit'] + ", " + new_row['author']);
+                    //console.log("Add row " + new_row['title'] + ", " + new_row['year'] + ", " + new_row['ncit'] + ", " + new_row['author']);
                     $('#papertable').datagrid('appendRow', {
                         year: new_node['year'],
                         nc: new_node['ncit'],
                         author: new_node['author'],
+                        collection: new_node['collection'],
                         title: new_node['title'],
                         nodeId: new_node['node_data']['id']
                     });
@@ -378,7 +390,7 @@
                 updateSelection(selectedNode);
             });
 
-            network.on("stabilized", function () {
+            network.on("stabilizationIterationsDone", function () {
                 console.log("Network Stabilized");
                 network.setOptions({ physics: false });
             });
@@ -432,6 +444,7 @@
                         <th data-options="field:'year',sortable:true" width="10">Year</th>
                         <th data-options="field:'nc',sortable:true" width="10">#Cit</th>
                         <th data-options="field:'author',align:'right',sortable:true" width="20">Author</th>
+                        <th data-options="field:'collection',align:'right',sortable:true" width="30">Col</th>
                         <th data-options="field:'title',align:'right',sortable:true" width="30">Title</th>
                         <th data-options="field:'nodeId',hidden:true" width="0"></th>
                     </tr>
@@ -597,14 +610,36 @@
                     <input class="easyui-validatebox" type="text" name="paperid" />
                 </div>
             </form>
+            <form id="addcollection" method="get">
+                <div>
+                    <input type="hidden" name="pname" value={{pname}}>
+                    <label for="collection_id">Add Collection:</label>
+                    <input class="easyui-validatebox" type="text" name="collection_id" />
+                </div>
+            </form>
             <script type="text/javascript">
                 var url = "{{ url_for('addpaper') }}";
+                showLoader();
                 $('#addpaper').form({
                     url: url,
                     datatype: "json",
                     success: function (res) {
                         data = JSON.parse(res);
                         updateGraph(data['new_nodes'], data['new_edges'], data['new_paperinfo']);
+                        hideLoader();
+                    }
+                });
+            </script>
+            <script type="text/javascript">
+                var url = "{{ url_for('addcollection') }}";
+                showLoader();
+                $('#addcollection').form({
+                    url: url,
+                    datatype: "json",
+                    success: function (res) {
+                        data = JSON.parse(res);
+                        updateGraph(data['new_nodes'], data['new_edges'], data['new_paperinfo']);
+                        hideLoader();
                     }
                 });
             </script>
@@ -613,6 +648,10 @@
                     $(document).ready(function () {
                         showLoader();
                         drawGraph();
+                        var n_rows = $('#papertable').datagrid('getRows').length;
+                        for (let i = 0; i < n_rows; i++) {
+                            $('#papertable').datagrid('refreshRow', i);
+                        }
                         hideLoader();
                     });
                 </script>

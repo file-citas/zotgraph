@@ -135,10 +135,10 @@ class SemanticScholar:
             url = '{}/{}?query={}&limit=10&fields=title'.format(self.api_search_url, method, id)
             
         
-        logging.info("Semantic Scholar %s" %(url))
+        #logging.info("Semantic Scholar %s" %(url))
         r = requests.get(url, timeout=self.timeout, headers=self.auth_header)
 
-        logging.info("Semantic Scholar %d %s" %(r.status_code, url))
+        #logging.info("Semantic Scholar %d %s" %(r.status_code, url))
         if r.status_code == 200:
             data = r.json()
             if len(data) == 1 and 'error' in data:

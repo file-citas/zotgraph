@@ -162,6 +162,24 @@ def addpaper():
     }
     return res
 
+
+@app.route('/addcollection')
+def addcollection():
+    pname = request.args.get("pname")
+    collection_id = request.args.get("collection_id")
+    logging.info("Add CollectionId %s" % collection_id)
+    new_edges = []
+    new_nodes = []
+    if collection_id is not None and collection_id != "":
+        new_nodes, new_edges, new_paperinfo = projects[pname].addCollectionId(collection_id)
+        projects[pname].saveGraph()
+    res = {
+        'new_nodes': new_nodes,
+        'new_edges': new_edges,
+        'new_paperinfo': new_paperinfo,
+    }
+    return res
+
 @app.route('/getcits')
 def getcits():
     pname = request.args.get("pname")
