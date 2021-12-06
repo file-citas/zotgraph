@@ -29,6 +29,12 @@ PAPER_DEDUPS= {
     "c9cfafe6655cf84ee5c3f1924b2e03839634ea60": "81afe3f238b7ec01e30346bb476e3d29af9683aa",
     "2148c6ae13180dbc4e7aec3a56f41abd66c1784a": "f97154903f5b00b07f31623fa2e7ba8d81982762",
     "b0ff249b9b507fb973f007656598a19fc6e9b287": "65e946633ddf39084ec9c37e00e05b89ed424d39",
+    "2fea70a922718568c74213bccbc4f3582d326846": "559bb3e298b1aeb37abf05c9b4f12f2a1705d99a",
+    "bd37ff9dae5561443a0d7aa33dbc251efa960eed": "95cce1f0cc8332c201a51a2523e17f5e0d0c17ab",
+    "d2fc0aefcf4e00a2ca19e5aff3527429c1d669db": "16736deb0aa0c249a321f287104d67316224c0ee",
+    "16736deb0aa0c249a321f287104d67316224c0ee": "3a68da7f4eb439e8bb7121a3833b191f2329bbff",
+    "3ca53bdbe11d7fd5c97d5c7023d2f4d682a6195f": "791f88d30b59bff7a9c8a72727036b73645255ce",
+    "59bbae84eeff059cfc36040f5a9e7009bf7b95cc": "8cb6b775dd015dcf23ed1a583aea35d60434b2b2",
 }
 PAPER_DEDUPS_INV = {v: k for k, v in PAPER_DEDUPS.items()}
 # Available values : acs, ama, apa, chicago, ensemble, experimental, harvard, ieee, mhra, mla, nature, vancouver
@@ -137,8 +143,8 @@ class ZotGraph:
             ncit = len(smitem['citations'])
         except:
             pass
-        if 'zaitem' in self.nodes[paperId].keys() and len(self.nodes[paperId]['zaitem']) > 0:
-            zaitem = self.nodes[paperId]['zaitem'][0]
+        zaitem = self.__getZaItem(paperId=paperId)
+        if zaitem is not None:
             cnames = []
             for col in zaitem['data']['collections']:
                 cnames.append(self.za.getCollectionName(col))
@@ -278,6 +284,17 @@ class ZotGraph:
             node['r_processed'] = False
             node['c_processed'] = False
             return node
+    
+    @dedup_paper
+    def __getZaItem(self, paperId=None):
+        if paperId not in self.nodes.keys():
+            return None
+        node = self.nodes[paperId]
+        if 'zaitem' not in node.keys():
+            return None
+        if len(node['zaitem']) != 1:
+            return None
+        return node['zaitem'][0]
 
     def __extractRefs(self, key, paperId=None):
         try:
@@ -444,7 +461,7 @@ class ZotGraph:
         return None
 
     @dedup_paper
-    def __getAnnotRefs(self, paperId=None, annots=None):
+    def __getAnnotRefs(self, zaitem, paperId=None, annots=None):
         verbose = False
         #if paperId == "0fc4415291af1e74f23dfcf3ba3ab192c6649a79":
         #    verbose = True
@@ -456,12 +473,12 @@ class ZotGraph:
         plinks = None
         refids = None
         try:
-            prefs = self.nodes[paperId]['zaitem'][0]['extref']["titles"]
-            plinks = self.nodes[paperId]['zaitem'][0]['extref']["links"]
-            refids = self.nodes[paperId]['zaitem'][0]['extref']["paperIds"]
+            prefs = zaitem['extref']["titles"]
+            plinks = zaitem['extref']["links"]
+            refids = zaitem['extref']["paperIds"]
         except Exception as e:
             logging.debug("No extracted annotations for %s: %s" % (paperId, e))
-            logging.debug(json.dumps(self.nodes[paperId]['zaitem'][0]))
+            logging.debug(json.dumps(zaitem))
             return {}
         #logging.debug(annots)
         refs = ZotGraph.P_REFS_TEST.findall(annots)
@@ -526,32 +543,29 @@ class ZotGraph:
         return refs_replace
 
     @dedup_paper
+    def __getAnnotationsZa(self, zaitem, paperId=None, verbose=False):
+        annots = ZotGraph.NO_ANNOTS_STR
+        if zaitem is not None:
+            annots_cand = self.za.getAnnotations(zaitem['key'])[0]
+            if isinstance(annots_cand, str):
+                annots = annots_cand
+                #logging.info("Got annots for %s: %s" % (paperId, annots))
+                ref_replace = self.__getAnnotRefs(zaitem, paperId=paperId, annots=annots)
+                for key, replacement in ref_replace.items():
+                    if verbose:
+                        logging.debug("Replace %s ref %s -> %s" % (paperId, key, replacement))
+                    annots = annots.replace(key, replacement)
+        return annots 
+
+    @dedup_paper
     def __getAnnotations(self, paperId=None):
         verbose = False
         #if paperId == "0fc4415291af1e74f23dfcf3ba3ab192c6649a79":
         #    verbose = True
         logging.debug("Get annotations references for paperId %s" % paperId)
         annots = ZotGraph.NO_ANNOTS_STR
-        zaitem = None
-        try:
-            zaitem = self.nodes[paperId]['zaitem']
-            zaitem = zaitem[0]
-        except (KeyError, IndexError):
-            logging.debug("No zotero item for paperId %s" % paperId)
-            return annots
-        
-        if zaitem is not None:
-            annots_cand = self.za.getAnnotations(zaitem['key'])[0]
-            if isinstance(annots_cand, str):
-                annots = annots_cand
-                #logging.info("Got annots for %s: %s" % (paperId, annots))
-                ref_replace = self.__getAnnotRefs(paperId=paperId, annots=annots)
-                for key, replacement in ref_replace.items():
-                    if verbose:
-                        logging.debug("Replace %s ref %s -> %s" % (paperId, key, replacement))
-                    annots = annots.replace(key, replacement)
-        
-        logging.debug("Got annotations references for paperId %s" % paperId)
+        zaitem = self.__getZaItem(paperId=paperId)
+        annots = self.__getAnnotationsZa(zaitem, paperId=paperId)
         return annots 
 
     @dedup_paper
@@ -668,7 +682,7 @@ class ZotGraph:
             logging.error("Failed to get node for %s" % paperId)
             raise("Failed to get node")
         return node
-
+    
     @dedup_paper    
     def __whatDoOthersSay(self, paperId=None):
         if paperId not in self.nodes:
@@ -678,14 +692,26 @@ class ZotGraph:
         logging.debug("Get Mentions about %s" % paperId)
         ret = ""
         handled = set()
-        for ref in self.nodes[paperId]['smitem']["citations"]:
-            ref_id = ref["paperId"]
-            if ref_id not in self.nodes:
-                continue
+        for cit in self.nodes[paperId]['smitem']["citations"]:
+            ref_id = cit["paperId"]
             if ref_id in handled:
                 continue
             handled.add(ref_id)
-            annots = self.__getAnnotations(paperId=ref_id)
+
+            if ref_id not in self.nodes:
+                logging.info("loading mentions from external node %s" % ref_id)
+                extNode = self.__loadCacheNode(ref_id)
+                if extNode is None:
+                    continue
+                zaitem = self.__getZaItem(paperId=ref_id)
+                if 'zaitem' in extNode.keys() and len(extNode['zaitem']) > 0:
+                    annots = self.__getAnnotationsZa(extNode['zaitem'][0], paperId=ref_id)
+                else:
+                    continue
+                otherNode = extNode
+            else:
+                otherNode = self.__getNode(paperId=paperId)
+                annots = self.__getAnnotations(paperId=ref_id)
             
             if not isinstance(annots, str) or annots == ZotGraph.NO_ANNOTS_STR:
                 continue
@@ -693,12 +719,12 @@ class ZotGraph:
             for para in annots.split("<p>"):
                 if paperId in para:
                     refs = ZotGraph.P_REFS2.findall(annots)
-                    for ref in refs:
-                        if paperId in ref[0]:
-                            para = para.replace(ref[0], "<strong>%s</strong>" % ref[0])
+                    for a_ref in refs:
+                        if paperId in a_ref[0]:
+                            para = para.replace(a_ref[0], "<strong>%s</strong>" % a_ref[0])
                     ret_paras += "<p>" + para
             if ret_paras != "":
-                ret += "<p><strong>%s</strong> says: </p> %s" % (self.nodes[ref_id]["title"], ret_paras)
+                ret += "<p><strong>%s</strong> says: </p> %s" % (otherNode["title"], ret_paras)
         return ret
 
     @dedup_paper
@@ -722,10 +748,10 @@ class ZotGraph:
 
     @dedup_paper
     def __getColorCollection(self, paperId=None):
-        if 'zaitem' not in self.nodes[paperId] or len(self.nodes[paperId]['zaitem']) == 0:
+        zaitem = self.__getZaItem(paperId=paperId)
+        if zaitem is None:
             return ZotGraph.COLOR_DEFAULT_N
         try:
-            zaitem = self.nodes[paperId]['zaitem'][0]
             cols = zaitem['data']['collections']
             cols.sort()
             colkey = "_".join(cols)
